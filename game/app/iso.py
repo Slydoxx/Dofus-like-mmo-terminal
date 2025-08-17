@@ -15,8 +15,17 @@ import heapq
 
 TILE_W = 64
 TILE_H = 24
-SCREEN_W = 1024
-SCREEN_H = 768
+SCREEN_W = 1920
+SCREEN_H = 1080
+
+# UI colors
+COLOR_BG = (20, 20, 30)
+COLOR_PANEL = (15, 15, 22)
+COLOR_HEADER = (22, 22, 30)
+COLOR_BORDER = (35, 40, 60)
+COLOR_TEXT = (230, 230, 240)
+COLOR_SUBTEXT = (180, 180, 190)
+COLOR_HILITE = (90, 160, 230)
 
 
 def iso_coords_scaled(x: int, y: int, tw: int, th: int) -> Tuple[int, int]:
@@ -53,6 +62,18 @@ def main() -> int:
     merchant_dialog_text = ""
     merchant_stage = "greet"
     show_log = False
+    profile_mode = False
+    dragging_item = None
+    dragging_mouse = (0, 0)
+    # Draggable panel state
+    inv_panel_w, inv_panel_h = 520, 300
+    inv_panel_x, inv_panel_y = SCREEN_W - inv_panel_w - 16, 80
+    inv_dragging = False
+    inv_drag_offset = (0, 0)
+    prof_panel_w, prof_panel_h = 680, 360
+    prof_panel_x, prof_panel_y = SCREEN_W//2 - prof_panel_w//2, SCREEN_H//2 - prof_panel_h//2
+    prof_dragging = False
+    prof_drag_offset = (0, 0)
     movement_path: list[tuple[int, int]] = []
     preview_path: list[tuple[int, int]] = []
     last_hover: tuple[int, int] | None = None
@@ -97,7 +118,10 @@ def main() -> int:
                     elif inventory_mode:
                         inventory_mode = False
                     else:
-                        running = False
+                        # Open the initial main menu as a simple pause menu
+                        main_menu = True
+                        menu_sel = 0
+                        continue
                 elif event.key == pygame.K_MINUS:
                     scale = max(0.6, scale - 0.1)
                 elif event.key in (pygame.K_EQUALS, pygame.K_PLUS):
@@ -108,6 +132,9 @@ def main() -> int:
                         inv_tab = 0
                         inv_sel = 0
                         sell_mode = False
+                elif event.key == pygame.K_p:
+                    if not (shop_mode or shop_dialog or npc_dialog or merchant_dialog):
+                        profile_mode = not profile_mode
                 elif event.key == pygame.K_h:
                     show_log = not show_log
                 elif shop_dialog:
@@ -278,8 +305,34 @@ def main() -> int:
                             if near:
                                 npc_dialog = True
                                 npc_dialog_text = "Hello, traveler. The dungeon awaits!"
-            elif event.type == pygame.MOUSEBUTTONDOWN and not (inventory_mode or shop_mode or npc_dialog):
-                if state.in_combat and event.button == 1:
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                mx, my = pygame.mouse.get_pos()
+                if inventory_mode and event.button == 1:
+                    # Inventory header drag
+                    inv_header = pygame.Rect(inv_panel_x, inv_panel_y, inv_panel_w, 28)
+                    if inv_header.collidepoint(mx, my):
+                        inv_dragging = True
+                        inv_drag_offset = (mx - inv_panel_x, my - inv_panel_y)
+                    # Begin dragging item from list
+                    list_y = inv_panel_y + 36
+                    idx = (my - list_y) // 24
+                    cats = {
+                        0: [it for it in state.player.inventory.items if hasattr(it, 'effect_type')],
+                        1: [it for it in state.player.inventory.items if hasattr(it, 'weapon_type')],
+                        2: [it for it in state.player.inventory.items if hasattr(it, 'slot') and not hasattr(it, 'weapon_type')],
+                    }
+                    items = cats.get(inv_tab, [])
+                    if 0 <= idx < len(items):
+                        dragging_item = items[idx]
+                        dragging_mouse = (mx, my)
+                if profile_mode and event.button == 1:
+                    # Profile header drag
+                    prof_header = pygame.Rect(prof_panel_x, prof_panel_y, prof_panel_w, 32)
+                    if prof_header.collidepoint(mx, my):
+                        prof_dragging = True
+                        prof_drag_offset = (mx - prof_panel_x, my - prof_panel_y)
+                # World/combat click handling
+                if state.in_combat and event.button == 1 and not (inventory_mode or profile_mode or shop_mode or npc_dialog):
                     mx, my = pygame.mouse.get_pos()
                     TW = max(16, int(TILE_W * scale))
                     TH = max(8, int(TILE_H * scale))
@@ -323,9 +376,57 @@ def main() -> int:
                             else:
                                 movement_path = path
                             step_timer = 0.0
-            # ignore mouse up for world movement
+            # Mouse up: drop drag to equipment slots if profile open
+            if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+                # stop panel drags
+                inv_dragging = False
+                prof_dragging = False
+                # Handle drop to equip
+                if dragging_item is not None and profile_mode:
+                    mx, my = pygame.mouse.get_pos()
+                    mid_x = prof_panel_x + 240
+                    mid_y = prof_panel_y + 44
+                    slot_rects = {
+                        'weapon': pygame.Rect(mid_x, mid_y + 22, 220, 20),
+                        'armor': pygame.Rect(mid_x, mid_y + 22*3, 220, 20),
+                        'helmet': pygame.Rect(mid_x, mid_y + 22*4, 220, 20),
+                        'boots': pygame.Rect(mid_x, mid_y + 22*5, 220, 20),
+                    }
+                    for slot, rect in slot_rects.items():
+                        if rect.collidepoint(mx, my):
+                            # Equip and manage inventory swap
+                            if slot == 'weapon' and hasattr(dragging_item, 'weapon_type'):
+                                prev = state.player.equipment.equip_item(dragging_item)
+                                state.player.inventory.remove_item(dragging_item.id, 1)
+                                if prev is not None:
+                                    state.player.inventory.add_item(prev)
+                                # progression expects weapon_type (e.g., 'staff')
+                                state.player.progression.equipped_weapon = dragging_item.weapon_type
+                                state.log.entries.append(f"Equipped {dragging_item.name} to Weapon")
+                            elif slot in ('armor','helmet','boots') and hasattr(dragging_item, 'slot') and dragging_item.slot == slot:
+                                prev = state.player.equipment.equip_item(dragging_item)
+                                state.player.inventory.remove_item(dragging_item.id, 1)
+                                if prev is not None:
+                                    state.player.inventory.add_item(prev)
+                                state.log.entries.append(f"Equipped {dragging_item.name} to {slot.title()}")
+                            break
+                if dragging_item is not None:
+                    dragging_item = None
+                    dragging_mouse = (0,0)
+            if event.type == pygame.MOUSEMOTION:
+                if inv_dragging:
+                    mx, my = event.pos
+                    inv_panel_x = max(0, min(SCREEN_W - inv_panel_w, mx - inv_drag_offset[0]))
+                    inv_panel_y = max(0, min(SCREEN_H - inv_panel_h, my - inv_drag_offset[1]))
+                if prof_dragging:
+                    mx, my = event.pos
+                    prof_panel_x = max(0, min(SCREEN_W - prof_panel_w, mx - prof_drag_offset[0]))
+                    prof_panel_y = max(0, min(SCREEN_H - prof_panel_h, my - prof_drag_offset[1]))
+                if dragging_item is not None:
+                    # Update drag preview position
+                    dragging_mouse = pygame.mouse.get_pos()
 
-        screen.fill((20, 20, 30))
+        screen.fill(COLOR_BG)
 
         if main_menu:
             title_font = pygame.font.SysFont(None, 64)
@@ -353,7 +454,7 @@ def main() -> int:
             # Dialog panel
             panel_w, panel_h = 360, 200
             panel_x, panel_y = SCREEN_W//2 - panel_w//2, SCREEN_H//2 - panel_h//2
-            pygame.draw.rect(screen, (18, 18, 26), pygame.Rect(panel_x, panel_y, panel_w, panel_h))
+            pygame.draw.rect(screen, COLOR_PANEL, pygame.Rect(panel_x, panel_y, panel_w, panel_h))
             title = pygame.font.SysFont(None, 28).render("Merchant", True, (235, 235, 245))
             screen.blit(title, (panel_x + 12, panel_y + 10))
             opts = ["Buy", "Sell", "Leave"]
@@ -530,7 +631,7 @@ def main() -> int:
         if npc_dialog:
             panel_w, panel_h = 520, 160
             panel_x, panel_y = SCREEN_W//2 - panel_w//2, SCREEN_H - panel_h - 60
-            pygame.draw.rect(screen, (18, 18, 26), pygame.Rect(panel_x, panel_y, panel_w, panel_h))
+            pygame.draw.rect(screen, COLOR_PANEL, pygame.Rect(panel_x, panel_y, panel_w, panel_h))
             speaker = pygame.font.SysFont(None, 24).render("NPC:", True, (235, 235, 245))
             # Simple word wrap
             words = npc_dialog_text.split(" ")
@@ -603,6 +704,70 @@ def main() -> int:
             screen.blit(surf, (8, y))
             y += 20
 
+        # Profile panel (draggable)
+        if profile_mode:
+            pygame.draw.rect(screen, COLOR_PANEL, pygame.Rect(prof_panel_x, prof_panel_y, prof_panel_w, prof_panel_h))
+            # header
+            pygame.draw.rect(screen, COLOR_HEADER, pygame.Rect(prof_panel_x, prof_panel_y, prof_panel_w, 32))
+            title = pygame.font.SysFont(None, 26).render("Profile", True, (235,235,245))
+            screen.blit(title, (prof_panel_x + 12, prof_panel_y + 6))
+            # Identity & Stats
+            sleft_x = prof_panel_x + 16
+            sleft_y = prof_panel_y + 44
+            name_txt = pygame.font.SysFont(None, 24).render(f"Name: {state.player.name}", True, (220,220,230))
+            gold_txt = pygame.font.SysFont(None, 24).render(f"Gold: {state.player.gold}", True, (220,220,230))
+            screen.blit(name_txt, (sleft_x, sleft_y)); sleft_y += 26
+            screen.blit(gold_txt, (sleft_x, sleft_y)); sleft_y += 26
+            st = total
+            for lab, val in [("HP", f"{st.current_hp}/{st.hp}"), ("AP", st.ap), ("MP", st.mp), ("ATK", st.atk), ("RES", st.res), ("ARMOR", st.armor)]:
+                surf = pygame.font.SysFont(None, 22).render(f"{lab}: {val}", True, (205,205,215))
+                screen.blit(surf, (sleft_x, sleft_y)); sleft_y += 22
+            # Equipment
+            mid_x = prof_panel_x + 240
+            mid_y = prof_panel_y + 44
+            screen.blit(pygame.font.SysFont(None, 24).render("Equipment", True, (220,220,230)), (mid_x, mid_y)); mid_y += 26
+            eq = state.player.equipment
+            weapon_name = eq.weapon.name if eq.weapon else "None"
+            screen.blit(pygame.font.SysFont(None, 22).render(f"Weapon: {weapon_name}", True, (205,205,215)), (mid_x, mid_y)); mid_y += 22
+            if eq.weapon:
+                from .game_loop import get_abilities_for_weapon
+                abs_list = [a.name for a in get_abilities_for_weapon(eq.weapon.weapon_type)][:3]
+                screen.blit(pygame.font.SysFont(None, 20).render("Abilities: " + ", ".join(abs_list), True, (190,190,200)), (mid_x+10, mid_y)); mid_y += 22
+            for slot, item in [("Armor", eq.armor), ("Helmet", eq.helmet), ("Boots", eq.boots)]:
+                name = item.name if item else "None"
+                screen.blit(pygame.font.SysFont(None, 22).render(f"{slot}: {name}", True, (205,205,215)), (mid_x, mid_y)); mid_y += 22
+            # Draw drop slot hints (subtle boxes)
+            for i, (slot, yoff) in enumerate([("weapon", 22), ("armor", 22*3), ("helmet", 22*4), ("boots", 22*5)]):
+                r = pygame.Rect(mid_x, (prof_panel_y + 44) + yoff, 220, 20)
+                pygame.draw.rect(screen, COLOR_BORDER, r, 1)
+            # Weight
+            wt = state.player.inventory.total_weight
+            wx = prof_panel_x + 16
+            wy = prof_panel_y + prof_panel_h - 30
+            wtxt = pygame.font.SysFont(None, 20).render(f"Weight: {wt:.1f}/{state.player.inventory.max_weight}", True, (180,180,190))
+            screen.blit(wtxt, (wx, wy))
+            # Weapon skills
+            right_x = prof_panel_x + 430
+            right_y = prof_panel_y + 44
+            screen.blit(pygame.font.SysFont(None, 24).render("Weapon Skills", True, (220,220,230)), (right_x, right_y)); right_y += 30
+            ws = state.player.progression.weapon_skills
+            bars = [("Melee", ws.melee_damage), ("Ranged", ws.ranged_damage), ("Magic", ws.magic_damage)]
+            for label, val in bars:
+                bar_w = 200
+                pygame.draw.rect(screen, (40,45,60), pygame.Rect(right_x, right_y, bar_w, 16))
+                fill = int(min(1.0, val/100.0) * bar_w)
+                pygame.draw.rect(screen, COLOR_HILITE, pygame.Rect(right_x, right_y, fill, 16))
+                lab = pygame.font.SysFont(None, 20).render(f"{label}: {val}", True, (200,200,210))
+                screen.blit(lab, (right_x + bar_w + 10, right_y - 2))
+                right_y += 24
+        # Draw dragging preview
+        if dragging_item is not None:
+            mx, my = pygame.mouse.get_pos()
+            label = dragging_item.name
+            surf = pygame.font.SysFont(None, 20).render(label, True, (230,230,240))
+            pygame.draw.rect(screen, (20,20,28), surf.get_rect(center=(mx+1, my+1)))
+            screen.blit(surf, (mx+8, my))
+
         # Mini-map (top-right)
         mm_w, mm_h = 180, 140
         mm_x, mm_y = SCREEN_W - mm_w - 12, 12
@@ -661,25 +826,23 @@ def main() -> int:
                 screen.blit(surf, (8, y))
                 y += 20
 
-        # Inventory panel
+        # Inventory panel (draggable)
         if inventory_mode:
-            panel_w = 520
-            panel_h = 300
-            panel_x = SCREEN_W - panel_w - 16
-            panel_y = 80
-            pygame.draw.rect(screen, (15, 15, 22), pygame.Rect(panel_x, panel_y, panel_w, panel_h))
+            pygame.draw.rect(screen, (15, 15, 22), pygame.Rect(inv_panel_x, inv_panel_y, inv_panel_w, inv_panel_h))
+            # header bar
+            pygame.draw.rect(screen, (22, 22, 30), pygame.Rect(inv_panel_x, inv_panel_y, inv_panel_w, 28))
             tabs = ["Items", "Weapons", "Armor"]
             tab_text = "  ".join([("["+t+"]") if i == inv_tab else t for i, t in enumerate(tabs)])
             if sell_mode:
                 tab_text += "   (Sell mode)"
-            screen.blit(font.render(tab_text, True, (220, 220, 230)), (panel_x + 10, panel_y + 8))
+            screen.blit(font.render(tab_text, True, (220, 220, 230)), (inv_panel_x + 10, inv_panel_y + 6))
             cats = {
                 0: [it for it in state.player.inventory.items if hasattr(it, 'effect_type')],
                 1: [it for it in state.player.inventory.items if hasattr(it, 'weapon_type')],
                 2: [it for it in state.player.inventory.items if hasattr(it, 'slot') and not hasattr(it, 'weapon_type')],
             }
             items = cats.get(inv_tab, [])
-            list_y = panel_y + 36
+            list_y = inv_panel_y + 36
             for i, it in enumerate(items[:10]):
                 mark = ">" if i == inv_sel else " "
                 qty = getattr(it, 'quantity', 1)
@@ -689,10 +852,10 @@ def main() -> int:
                     line = f"{mark} {it.name} x{qty}  [{sell_price}g]"
                 else:
                     line = f"{mark} {it.name} x{qty}"
-                screen.blit(font.render(line, True, (230, 230, 240)), (panel_x + 10, list_y))
+                screen.blit(font.render(line, True, (230, 230, 240)), (inv_panel_x + 10, list_y))
                 list_y += 24
-            info_y = panel_y + 36
-            info_x = panel_x + 280
+            info_y = inv_panel_y + 36
+            info_x = inv_panel_x + 280
             if items and inv_sel < len(items):
                 it = items[inv_sel]
                 screen.blit(font.render(it.description, True, (200, 200, 210)), (info_x, info_y)); info_y += 24
