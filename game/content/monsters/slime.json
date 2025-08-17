@@ -1,0 +1,9 @@
+{
+  "id": "slime",
+  "name": "Slime",
+  "tags": ["monster"],
+  "stats": {"hp": 70, "ap": 6, "mp": 3, "atk": 12, "res": 3},
+  "abilities": ["bolt"]
+}
+
+

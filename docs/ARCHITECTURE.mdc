@@ -1,0 +1,16 @@
+Modules and responsibilities
+
+- engine: pure logic, no I/O
+- app: terminal input and rendering only
+- content: JSON data loaded and validated by pydantic
+
+Dependencies
+
+- app depends on engine
+- engine/content models are used by app for initialization
+- abilities are registered in a registry and referenced by id
+
+Boundaries
+
+- No prints or inputs inside engine
+- UI formatting and key handling live in app only

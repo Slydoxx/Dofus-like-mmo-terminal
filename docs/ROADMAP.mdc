@@ -1,0 +1,15 @@
+it0
+
+- Terminal loop, movement, tags, content validation, ability intents
+
+it1
+
+- Resolve effects (damage, push, focus), AP/MP per turn, end turn, LoS validation, tests
+
+it2
+
+- Targeting mode in terminal
+
+it3
+
+- Iso renderer with raylib

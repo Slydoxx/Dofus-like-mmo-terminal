@@ -1,0 +1,5 @@
+It0-Finish: Ajoute la sélection de capacités 1/2/3 dans le terminal et log l’intention via combat stub (PA/portée basique).
+
+It1-Combat: Implémente la résolution réelle des effets (damage/push/focus), gestion PA/PM par tour, fin de tour (touche e), et validation portée+LoS (Bresenham). Ajoute test_abilities.py.
+
+It2-Targeting: Ajoute un mode ciblage en terminal (curseur de cible) et validation cible (in-bounds, hostile, portée).

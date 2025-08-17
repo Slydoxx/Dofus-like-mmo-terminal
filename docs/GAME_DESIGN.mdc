@@ -1,0 +1,18 @@
+Goals
+
+- Terminal ASCII map 20x12, player @, obstacles #, empty .
+- Movement validated by grid
+- Minimal tags on Player, Monster, Ability
+- Three abilities registered: bolt, push, focus (intent only)
+
+Content
+
+- Maps: name, width, height, blocked
+- Monsters: id, name, tags, stats, abilities
+- Spells: id, name, tags, cost_ap, range_min, range_max, effects
+
+Constraints
+
+- Pure engine logic; terminal-only UI
+- JSON validated by pydantic
+- No networking, no iso renderer, no inventory

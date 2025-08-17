@@ -1,0 +1,9 @@
+Contract
+
+- Entities and abilities carry tags as strings
+- TaggableMixin provides has_tag and has_any
+- Pure function computes damage multiplier from target tags
+
+Initial tags
+
+- monster, player, projectile, ranged, control, buff, self, boss
