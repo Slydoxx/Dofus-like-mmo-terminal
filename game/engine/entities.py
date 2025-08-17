@@ -92,3 +92,7 @@ class Merchant(Entity):
 	shop_id: str
 
 
+@dataclass
+class Npc(Entity):
+	dialogue_id: str
+

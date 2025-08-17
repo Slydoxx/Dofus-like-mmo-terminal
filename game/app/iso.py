@@ -43,6 +43,16 @@ def main() -> int:
     inv_sel = 0
     shop_mode = False
     shop_sel = 0
+    shop_dialog = False
+    shop_dialog_sel = 0  # 0 Buy, 1 Sell, 2 Leave
+    sell_mode = False
+    npc_dialog = False
+    npc_dialog_text = ""
+    merchant_dialog = False
+    merchant_dialog_sel = 0
+    merchant_dialog_text = ""
+    merchant_stage = "greet"
+    show_log = False
     movement_path: list[tuple[int, int]] = []
     preview_path: list[tuple[int, int]] = []
     last_hover: tuple[int, int] | None = None
@@ -73,7 +83,15 @@ def main() -> int:
                     elif event.key == pygame.K_ESCAPE:
                         running = False
                     continue
+                # When an NPC dialog is open, block all input except closing keys
+                if npc_dialog:
+                    if event.key in (pygame.K_RETURN, pygame.K_ESCAPE):
+                        npc_dialog = False
+                    continue
                 if event.key == pygame.K_ESCAPE:
+                    if npc_dialog:
+                        npc_dialog = False
+                        continue
                     if shop_mode:
                         shop_mode = False
                     elif inventory_mode:
@@ -89,6 +107,65 @@ def main() -> int:
                         inventory_mode = not inventory_mode
                         inv_tab = 0
                         inv_sel = 0
+                        sell_mode = False
+                elif event.key == pygame.K_h:
+                    show_log = not show_log
+                elif shop_dialog:
+                    if event.key == pygame.K_UP:
+                        shop_dialog_sel = (shop_dialog_sel - 1) % 3
+                    elif event.key == pygame.K_DOWN:
+                        shop_dialog_sel = (shop_dialog_sel + 1) % 3
+                    elif event.key == pygame.K_RETURN:
+                        if shop_dialog_sel == 0:
+                            shop_dialog = False
+                            shop_mode = True
+                            shop_sel = 0
+                        elif shop_dialog_sel == 1:
+                            shop_dialog = False
+                            # Enter sell mode (inventory overlay)
+                            sell_mode = True
+                            inventory_mode = True
+                            inv_tab = 0
+                            inv_sel = 0
+                        else:
+                            shop_dialog = False
+                    elif event.key == pygame.K_ESCAPE:
+                        shop_dialog = False
+                        sell_mode = False
+                elif merchant_dialog:
+                    # Merchant dialogue with inline choices after greet
+                    if merchant_stage == "greet":
+                        if event.key in (pygame.K_RETURN, pygame.K_ESCAPE):
+                            if event.key == pygame.K_RETURN:
+                                merchant_stage = "choose"
+                            else:
+                                merchant_dialog = False
+                        continue
+                    elif merchant_stage == "choose":
+                        if event.key == pygame.K_UP:
+                            merchant_dialog_sel = (merchant_dialog_sel - 1) % 3
+                        elif event.key == pygame.K_DOWN:
+                            merchant_dialog_sel = (merchant_dialog_sel + 1) % 3
+                        elif event.key == pygame.K_RETURN:
+                            if merchant_dialog_sel == 0:
+                                merchant_dialog = False
+                                shop_mode = True
+                                shop_sel = 0
+                                merchant_stage = "greet"
+                            elif merchant_dialog_sel == 1:
+                                merchant_dialog = False
+                                sell_mode = True
+                                inventory_mode = True
+                                inv_tab = 0
+                                inv_sel = 0
+                                merchant_stage = "greet"
+                            else:
+                                merchant_dialog = False
+                                merchant_stage = "greet"
+                        elif event.key == pygame.K_ESCAPE:
+                            merchant_dialog = False
+                            merchant_stage = "greet"
+                        continue
                 elif shop_mode:
                     # Shop navigation
                     # Find adjacent merchant
@@ -113,7 +190,7 @@ def main() -> int:
                                 state.player.inventory.add_item(item)
                                 state.log.entries.append(f"Bought {item.name} for {item_model.price}")
                 elif inventory_mode:
-                    # Inventory navigation
+                    # Inventory navigation (supports sell_mode)
                     cats = {
                         0: [it for it in state.player.inventory.items if hasattr(it, 'effect_type')],
                         1: [it for it in state.player.inventory.items if hasattr(it, 'weapon_type')],
@@ -136,8 +213,26 @@ def main() -> int:
                     elif event.key == pygame.K_RETURN:
                         items = cats.get(inv_tab, [])
                         if inv_sel < len(items):
-                            from .cli import use_item
-                            use_item(state, items[inv_sel])
+                            it = items[inv_sel]
+                            if sell_mode:
+                                # Sell one unit of selected item
+                                price = max(1, getattr(it, 'value', 1) // 2)
+                                state.player.add_gold(price)
+                                state.player.inventory.remove_item(it.id, 1)
+                                state.log.entries.append(f"Sold {it.name} for {price} gold")
+                                # Refresh selection bounds
+                                items = cats.get(inv_tab, [])
+                                if inv_sel >= len(items):
+                                    inv_sel = max(0, len(items) - 1)
+                            else:
+                                from .cli import use_item
+                                use_item(state, it)
+                    elif event.key == pygame.K_ESCAPE:
+                        if sell_mode:
+                            sell_mode = False
+                            inventory_mode = False
+                        else:
+                            inventory_mode = False
                 else:
                     # Isometric-friendly WASD mapping
                     # W: up (screen) => (-1, -1), S: down => (+1, +1)
@@ -166,9 +261,24 @@ def main() -> int:
                                 adj = m
                                 break
                         if adj:
-                            shop_mode = True
-                            shop_sel = 0
-            elif event.type == pygame.MOUSEBUTTONDOWN and not (inventory_mode or shop_mode):
+                            merchant_dialog = True
+                            merchant_dialog_text = "Welcome! Looking to trade?"
+                            merchant_dialog_sel = 0
+                            continue
+                        if npc_dialog:
+                            npc_dialog = False
+                            continue
+                        else:
+                            # NPC dialogue if adjacent
+                            near = None
+                            for n in getattr(state, 'npcs', []) or []:
+                                if abs(state.player.position[0]-n.position[0]) + abs(state.player.position[1]-n.position[1]) == 1:
+                                    near = n
+                                    break
+                            if near:
+                                npc_dialog = True
+                                npc_dialog_text = "Hello, traveler. The dungeon awaits!"
+            elif event.type == pygame.MOUSEBUTTONDOWN and not (inventory_mode or shop_mode or npc_dialog):
                 if state.in_combat and event.button == 1:
                     mx, my = pygame.mouse.get_pos()
                     TW = max(16, int(TILE_W * scale))
@@ -229,6 +339,30 @@ def main() -> int:
                 screen.blit(surf, (SCREEN_W//2 - 40, 240 + i*36))
             hint = small.render("↑/↓ to navigate, Enter to select", True, (150, 150, 160))
             screen.blit(hint, (SCREEN_W//2 - hint.get_width()//2, 240 + 3*36 + 16))
+            pygame.display.flip()
+            clock.tick(60)
+            continue
+        
+        # NPC dialog bubble will be drawn later without pausing the scene
+
+        if shop_dialog:
+            # Dim background
+            overlay = pygame.Surface((SCREEN_W, SCREEN_H), pygame.SRCALPHA)
+            overlay.fill((0, 0, 0, 120))
+            screen.blit(overlay, (0, 0))
+            # Dialog panel
+            panel_w, panel_h = 360, 200
+            panel_x, panel_y = SCREEN_W//2 - panel_w//2, SCREEN_H//2 - panel_h//2
+            pygame.draw.rect(screen, (18, 18, 26), pygame.Rect(panel_x, panel_y, panel_w, panel_h))
+            title = pygame.font.SysFont(None, 28).render("Merchant", True, (235, 235, 245))
+            screen.blit(title, (panel_x + 12, panel_y + 10))
+            opts = ["Buy", "Sell", "Leave"]
+            for i, label in enumerate(opts):
+                col = (240, 240, 255) if i == shop_dialog_sel else (175, 180, 190)
+                surf = pygame.font.SysFont(None, 24).render(label, True, col)
+                screen.blit(surf, (panel_x + 24, panel_y + 48 + i*32))
+            hint = pygame.font.SysFont(None, 20).render("↑/↓ Select  Enter Confirm  Esc Close", True, (150, 150, 160))
+            screen.blit(hint, (panel_x + 24, panel_y + panel_h - 32))
             pygame.display.flip()
             clock.tick(60)
             continue
@@ -361,7 +495,7 @@ def main() -> int:
                 sy = int(sy - cam_y + oy)
                 pygame.draw.circle(screen, (80, 120, 200), (sx + TW // 2, sy + TH // 2), 8)
 
-        # Draw merchants
+        # Draw merchants and NPCs (world only)
         if not state.in_combat:
             for m in getattr(state, 'merchants', []):
                 sx, sy = iso_coords_scaled(*m.position, TW, TH)
@@ -369,6 +503,12 @@ def main() -> int:
                 sy = int(sy - cam_y + oy)
                 pygame.draw.ellipse(screen, (0, 0, 0), pygame.Rect(sx + TW // 2 - 10, sy + TH // 2 + 4, 20, 6))
                 pygame.draw.circle(screen, (255, 215, 0), (sx + TW // 2, sy + TH // 2), max(6, int(10 * scale)))
+            for n in getattr(state, 'npcs', []) or []:
+                sx, sy = iso_coords_scaled(*n.position, TW, TH)
+                sx = int(sx - cam_x + ox)
+                sy = int(sy - cam_y + oy)
+                pygame.draw.ellipse(screen, (0, 0, 0), pygame.Rect(sx + TW // 2 - 10, sy + TH // 2 + 4, 20, 6))
+                pygame.draw.circle(screen, (80, 200, 80), (sx + TW // 2, sy + TH // 2), max(6, int(10 * scale)))
         
         # Draw monsters
         mons_to_draw = state.combat_state.monsters if (state.in_combat and state.combat_state) else state.monsters
@@ -385,6 +525,54 @@ def main() -> int:
         sy = int(sy - cam_y + oy)
         pygame.draw.ellipse(screen, (0, 0, 0), pygame.Rect(sx + TW // 2 - 10, sy + TH // 2 + 6, 22, 8))
         pygame.draw.circle(screen, (80, 200, 120), (sx + TW // 2, sy + TH // 2), max(8, int(12 * scale)))
+        
+        # Draw NPC dialog bubble overlay (non-blocking)
+        if npc_dialog:
+            panel_w, panel_h = 520, 160
+            panel_x, panel_y = SCREEN_W//2 - panel_w//2, SCREEN_H - panel_h - 60
+            pygame.draw.rect(screen, (18, 18, 26), pygame.Rect(panel_x, panel_y, panel_w, panel_h))
+            speaker = pygame.font.SysFont(None, 24).render("NPC:", True, (235, 235, 245))
+            # Simple word wrap
+            words = npc_dialog_text.split(" ")
+            lines = []
+            cur = ""
+            font24 = pygame.font.SysFont(None, 24)
+            for w in words:
+                test = (cur + " " + w).strip()
+                if font24.size(test)[0] > panel_w - 24:
+                    lines.append(cur)
+                    cur = w
+                else:
+                    cur = test
+            if cur:
+                lines.append(cur)
+            screen.blit(speaker, (panel_x + 12, panel_y + 12))
+            y_text = panel_y + 44
+            for ln in lines[:4]:
+                surf = font24.render(ln, True, (220, 220, 230))
+                screen.blit(surf, (panel_x + 12, y_text))
+                y_text += 26
+            hint = pygame.font.SysFont(None, 20).render("Enter/Esc to close", True, (150, 150, 160))
+            screen.blit(hint, (panel_x + panel_w - 180, panel_y + panel_h - 28))
+
+        # Draw Merchant dialog bubble overlay on top of map too
+        if merchant_dialog:
+            panel_w, panel_h = 520, 180
+            panel_x, panel_y = SCREEN_W//2 - panel_w//2, SCREEN_H - panel_h - 60
+            pygame.draw.rect(screen, (18, 18, 26), pygame.Rect(panel_x, panel_y, panel_w, panel_h))
+            speaker = pygame.font.SysFont(None, 24).render("Merchant:", True, (235, 235, 245))
+            msg = pygame.font.SysFont(None, 24).render(merchant_dialog_text, True, (220, 220, 230))
+            screen.blit(speaker, (panel_x + 12, panel_y + 12))
+            screen.blit(msg, (panel_x + 12, panel_y + 44))
+            if merchant_stage == "greet":
+                hint = pygame.font.SysFont(None, 20).render("Enter: Continue  Esc: Close", True, (150, 150, 160))
+                screen.blit(hint, (panel_x + panel_w - 200, panel_y + panel_h - 28))
+            else:
+                opts = ["Buy", "Sell", "Leave"]
+                for i, label in enumerate(opts):
+                    col = (240, 240, 255) if i == merchant_dialog_sel else (175, 180, 190)
+                    surf = pygame.font.SysFont(None, 24).render(label, True, col)
+                    screen.blit(surf, (panel_x + 24, panel_y + 80 + i*26))
 
         # HUD overlay with mini-map and quest stub
         font = pygame.font.SysFont(None, 22)
@@ -433,12 +621,16 @@ def main() -> int:
         # player dot
         px0, py0 = state.player.position
         pygame.draw.rect(screen, (80, 220, 120), pygame.Rect(mm_x + px0 * sx, mm_y + py0 * sy, max(2, sx), max(2, sy)))
+        # merchants on minimap (world only)
+        if not state.in_combat:
+            for m in getattr(state, 'merchants', []):
+                mx0, my0 = m.position
+                pygame.draw.rect(screen, (240, 200, 60), pygame.Rect(mm_x + mx0 * sx, mm_y + my0 * sy, max(2, sx), max(2, sy)))
+            for n in getattr(state, 'npcs', []) or []:
+                nx0, ny0 = n.position
+                pygame.draw.rect(screen, (80, 200, 80), pygame.Rect(mm_x + nx0 * sx, mm_y + ny0 * sy, max(2, sx), max(2, sy)))
 
-        # Key hints footer
-        footer = pygame.font.SysFont(None, 20)
-        hints = "WASD move  |  I inventory  |  Enter shop  |  E end turn  |  +/- zoom"
-        sh = footer.render(hints, True, (170, 175, 185))
-        screen.blit(sh, (SCREEN_W//2 - sh.get_width()//2, SCREEN_H - 24))
+        
 
 
 
@@ -457,15 +649,17 @@ def main() -> int:
                 movement_path = []
 
         # No pixel world movement; keyboard moves are tile-based via try_move above
-        # Log (last 5 entries)
-        log_lines = state.log.entries[-5:] if hasattr(state, 'log') else []
-        ly = SCREEN_H - 20 * (len(log_lines) + 1)
-        pygame.draw.rect(screen, (10, 10, 15), pygame.Rect(0, ly - 4, SCREEN_W, SCREEN_H - ly + 4))
-        y = ly
-        for entry in log_lines:
-            surf = font.render(entry, True, (200, 200, 210))
-            screen.blit(surf, (8, y))
-            y += 20
+        # Combat always shows the log; otherwise obey toggle
+        want_log = state.in_combat or show_log
+        if want_log:
+            log_lines = state.log.entries[-5:] if hasattr(state, 'log') else []
+            ly = SCREEN_H - 20 * (len(log_lines) + 1)
+            pygame.draw.rect(screen, (10, 10, 15), pygame.Rect(0, ly - 4, SCREEN_W, SCREEN_H - ly + 4))
+            y = ly
+            for entry in log_lines:
+                surf = font.render(entry, True, (200, 200, 210))
+                screen.blit(surf, (8, y))
+                y += 20
 
         # Inventory panel
         if inventory_mode:
@@ -476,6 +670,8 @@ def main() -> int:
             pygame.draw.rect(screen, (15, 15, 22), pygame.Rect(panel_x, panel_y, panel_w, panel_h))
             tabs = ["Items", "Weapons", "Armor"]
             tab_text = "  ".join([("["+t+"]") if i == inv_tab else t for i, t in enumerate(tabs)])
+            if sell_mode:
+                tab_text += "   (Sell mode)"
             screen.blit(font.render(tab_text, True, (220, 220, 230)), (panel_x + 10, panel_y + 8))
             cats = {
                 0: [it for it in state.player.inventory.items if hasattr(it, 'effect_type')],
@@ -487,7 +683,12 @@ def main() -> int:
             for i, it in enumerate(items[:10]):
                 mark = ">" if i == inv_sel else " "
                 qty = getattr(it, 'quantity', 1)
-                line = f"{mark} {it.name} x{qty}"
+                val = getattr(it, 'value', 0)
+                if sell_mode:
+                    sell_price = max(1, val // 2)
+                    line = f"{mark} {it.name} x{qty}  [{sell_price}g]"
+                else:
+                    line = f"{mark} {it.name} x{qty}"
                 screen.blit(font.render(line, True, (230, 230, 240)), (panel_x + 10, list_y))
                 list_y += 24
             info_y = panel_y + 36
@@ -503,10 +704,14 @@ def main() -> int:
                 elif hasattr(it, 'effect_type'):
                     screen.blit(font.render(f"{it.effect_type} {it.effect_value}", True, (200, 200, 210)), (info_x, info_y)); info_y += 24
                 screen.blit(font.render(f"Weight {it.weight} Value {it.value}", True, (200, 200, 210)), (info_x, info_y)); info_y += 24
-                screen.blit(font.render("Enter: Use/Equip  Esc: Close", True, (180, 180, 190)), (info_x, info_y))
+                if sell_mode:
+                    sp = max(1, getattr(it,'value',0)//2)
+                    screen.blit(font.render(f"Sell: {sp} gold (Enter to sell 1)", True, (180,180,190)), (info_x, info_y))
+                else:
+                    screen.blit(font.render("Enter: Use/Equip  Esc: Close", True, (180, 180, 190)), (info_x, info_y))
 
-        # Shop panel
-        if shop_mode:
+        # Shop panel (Buy mode)
+        if shop_mode and not shop_dialog:
             panel_w = 420
             panel_h = 260
             panel_x = 16
@@ -526,7 +731,7 @@ def main() -> int:
                     line = f"{mark} {it.item_id} - {it.price} gold"
                     screen.blit(font.render(line, True, (230, 230, 240)), (panel_x + 10, ylist))
                     ylist += 24
-                screen.blit(font.render("Enter: Buy  Esc: Close", True, (180, 180, 190)), (panel_x + 10, panel_y + panel_h - 28))
+                screen.blit(font.render("Enter: Buy  Esc: Close (Tab: Sell soon)", True, (180, 180, 190)), (panel_x + 10, panel_y + panel_h - 28))
 
         pygame.display.flip()
         clock.tick(60)

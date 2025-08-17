@@ -7,7 +7,7 @@ from typing import List, Tuple, Optional
 from ..engine.ability import Ability, REGISTRY, register, create_weapon_abilities, get_abilities_for_weapon, in_range
 from ..engine.combat import CombatState, CombatArena, IntentLog, validate_in_bounds_and_log, resolve_ability_effects, check_combat_trigger, end_combat_turn, render_combat_arena, try_move_in_combat, has_line_of_sight
 from ..engine.content import MapModel, MonsterModel, SpellModel, AbilityModel, load_map, load_monster, load_spells, load_abilities
-from ..engine.entities import Player, Monster, Merchant
+from ..engine.entities import Player, Monster, Merchant, Npc
 from ..engine.grid import Grid
 from ..engine.stats import Stats
 from ..engine.progression import Progression, WeaponSkills
@@ -27,6 +27,7 @@ class GameState:
 	merchants: List[Merchant]
 	map_name: str
 	log: IntentLog
+	npcs: List[Npc] | None = None
 	combat_state: Optional[CombatState] = None
 	in_combat: bool = False
 	player_world_pos: Optional[Tuple[int, int]] = None
@@ -136,11 +137,16 @@ def load_content_and_init() -> GameState:
 	merchants = [
 		Merchant(id="m1", name="Trader", stats=Stats(hp=1, ap=0, mp=0, atk=0, res=0), position=(5, 10), tags={"merchant"}, shop_id="general_store")
 	]
+	
+	npcs = [
+		Npc(id="npc1", name="Villager", stats=Stats(hp=1, ap=0, mp=0, atk=0, res=0), position=(3, 2), tags={"npc"}, dialogue_id="greeting_1")
+	]
 	return GameState(
 		grid=grid,
 		player=player,
 		monsters=monsters,
 		merchants=merchants,
+		npcs=npcs,
 		map_name=map_model.name,
 		log=IntentLog(entries=[])
 	)
