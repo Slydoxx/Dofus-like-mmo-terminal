@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import List, Tuple, Optional
 
 from .ability import Ability
+from .effects import Damage, Push, BuffAp, Charge
 from .grid import Grid
 from .entities import Entity, Player, Monster
 
@@ -175,21 +176,21 @@ def resolve_ability_effects(
 	combat_state.player_ap -= ability.cost_ap
 	
 	for effect in ability.effects:
-		if effect["type"] == "damage":
+		if isinstance(effect, Damage):
 			for monster in monsters:
 				if monster.position == target_pos:
 					# If this is a ranged tag, require line-of-sight; melee ignores LoS
 					if "ranged" in ability.tags and not has_line_of_sight(combat_state.combat_grid, source.position, target_pos):
 						combat_state.log.log("🚫 No line of sight")
 						return
-					damage = resolve_damage(source, monster, effect["amount"])
+					damage = resolve_damage(source, monster, effect.amount)
 					combat_state.log.log(f"⚔️ {ability.id} deals {damage} damage to {monster.name}")
 					if not monster.stats.is_alive():
 						combat_state.log.log(f"💀 {monster.name} is defeated!")
 						monsters.remove(monster)
 						return
 					break
-		elif effect["type"] == "charge":
+		elif isinstance(effect, Charge):
 			for monster in monsters:
 				if monster.position == target_pos:
 					dx = target_pos[0] - source.position[0]
@@ -204,7 +205,7 @@ def resolve_ability_effects(
 						combat_state.player.position = charge_pos
 						combat_state.log.log(f"💨 Charged to {charge_pos}")
 						
-						damage = resolve_damage(source, monster, effect["amount"])
+						damage = resolve_damage(source, monster, effect.amount)
 						combat_state.log.log(f"⚔️ Charge deals {damage} damage to {monster.name}")
 						if not monster.stats.is_alive():
 							combat_state.log.log(f"💀 {monster.name} is defeated!")
@@ -213,7 +214,7 @@ def resolve_ability_effects(
 					else:
 						combat_state.log.log(f"💨 Can't charge there - blocked!")
 					break
-		elif effect["type"] == "push":
+		elif isinstance(effect, Push):
 			for monster in monsters:
 				if monster.position == target_pos:
 					dx = target_pos[0] - source.position[0]
@@ -222,7 +223,7 @@ def resolve_ability_effects(
 						dx = dx // abs(dx)
 					if dy != 0:
 						dy = dy // abs(dy)
-					distance = max(1, int(effect.get("distance", 1)))
+					distance = max(1, int(effect.distance))
 					curr = target_pos
 					collided = False
 					for _ in range(distance):
@@ -244,9 +245,9 @@ def resolve_ability_effects(
 							monsters.remove(monster)
 							return
 					break
-		elif effect["type"] == "buff_ap":
-			combat_state.player_ap += effect["amount"]
-			combat_state.log.log(f"✨ AP buffed by {effect['amount']}")
+		elif isinstance(effect, BuffAp):
+			combat_state.player_ap += effect.amount
+			combat_state.log.log(f"✨ AP buffed by {effect.amount}")
 
 
 def check_combat_trigger(player_pos: Tuple[int, int], monsters: List[Monster]) -> Optional[Monster]:
@@ -307,6 +308,31 @@ def render_combat_arena(combat_state: CombatState) -> List[str]:
 		row += " ║"
 		lines.append(row)
 	
+	lines.append("╚══════════════════════════════════════════════════════════════╝")
+	return lines
+
+
+def render_combat_arena_with_cursor(combat_state: CombatState, cursor_pos: Tuple[int, int]) -> List[str]:
+	lines: List[str] = []
+	lines.append("╔══════════════════════════════════════════════════════════════╗")
+	lines.append("║                        COMBAT ARENA                          ║")
+	lines.append("╠══════════════════════════════════════════════════════════════╣")
+	for y in range(combat_state.combat_grid.height):
+		row = "║ "
+		for x in range(combat_state.combat_grid.width):
+			cell = (x, y)
+			if cell == combat_state.player.position:
+				row += "👤"
+			elif any(m.position == cell for m in combat_state.monsters):
+				row += "👹"
+			elif cell in combat_state.combat_grid.blocked:
+				row += "█"
+			elif cell == cursor_pos:
+				row += "+"
+			else:
+				row += "·"
+		row += " ║"
+		lines.append(row)
 	lines.append("╚══════════════════════════════════════════════════════════════╝")
 	return lines
 

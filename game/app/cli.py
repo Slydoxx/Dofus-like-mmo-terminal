@@ -4,6 +4,12 @@ import sys
 from typing import Optional
 
 from .game_loop import abilities_bar, handle_ability_selection, load_content_and_init, render_ascii, try_move, end_combat_turn
+from ..engine.content import load_shop
+from ..engine.inventory import get_item_by_id
+from pathlib import Path
+from ..engine.content import load_shop
+from ..engine.inventory import get_item_by_id
+from .game_loop import GameState
 
 
 HELP_TEXT = "Controls: w/a/s/d or z/q/s/d to move, 1/2/3 abilities, e end turn, i inventory, h help, q quit"
@@ -33,6 +39,8 @@ def draw(state, inventory_mode: bool = False, selected_item: int = 0, selected_t
 			print(f"👹 ENEMY:   HP:{monster.stats.current_hp:3d}/{monster.stats.hp:3d} | AP:{state.combat_state.monster_ap:2d} | MP:{state.combat_state.monster_mp:2d}")
 		print("=" * 60)
 		print(f"📋 Phase: {state.combat_state.current_phase.upper()}")
+		if getattr(state, 'targeting_mode', False) and getattr(state, 'target_cursor', None) is not None:
+			print(f"🎯 Targeting: cursor at {state.target_cursor} (arrows move, Enter confirm, ESC cancel)")
 		
 		if state.combat_state.current_phase == "player_turn":
 			actions = []
@@ -71,6 +79,15 @@ def draw(state, inventory_mode: bool = False, selected_item: int = 0, selected_t
 		
 		if state.player.inventory.items:
 			print("🎒 Inventory:")
+		# Show merchants nearby
+		adjacent = []
+		for m in getattr(state, 'merchants', []):
+			px, py = state.player.position
+			mx, my = m.position
+			if abs(px - mx) + abs(py - my) == 1:
+				adjacent.append(m)
+		if adjacent:
+			print("🛒 Press ENTER to talk to merchant")
 			for item in state.player.inventory.items:
 				if item.quantity > 1:
 					print(f"   {item.name} x{item.quantity}")
@@ -170,6 +187,8 @@ def main(argv: Optional[list[str]] = None) -> int:
 	inventory_mode = False
 	selected_item = 0
 	selected_tab = 0
+	shop_mode = False
+	shop_selected = 0
 	
 	draw(state, inventory_mode, selected_item, selected_tab)
 	while True:
@@ -218,7 +237,34 @@ def main(argv: Optional[list[str]] = None) -> int:
 					use_item(state, current_items[selected_item])
 			elif ch == "\x1b":  # ESC
 				inventory_mode = False
+		elif shop_mode:
+			adj = None
+			for m in getattr(state, 'merchants', []):
+				if abs(state.player.position[0]-m.position[0]) + abs(state.player.position[1]-m.position[1]) == 1:
+					adj = m
+					break
+			if not adj:
+				shop_mode = False
+			else:
+				shop = load_shop(Path(__file__).resolve().parents[1] / 'content' / 'shops' / f"{adj.shop_id}.json")
+				if ch in ("\x00", "\xe0"):
+					arrow = read_key()
+					if arrow == 'H':
+						shop_selected = max(0, shop_selected - 1)
+					elif arrow == 'P':
+						shop_selected = min(len(shop.items)-1, shop_selected + 1)
+				elif ch == "\r":
+					item_model = shop.items[shop_selected]
+					item = get_item_by_id(item_model.item_id)
+					if item and state.player.can_afford(item_model.price):
+						state.player.gold -= item_model.price
+						state.player.inventory.add_item(item)
+						state.log.entries.append(f"Bought {item.name} for {item_model.price}")
+				elif ch == "\x1b":
+					shop_mode = False
 		else:
+			# No targeting mode anymore
+
 			if ch in ("w", "z"):
 				try_move(state, 0, -1)
 			elif ch == "s":
@@ -230,11 +276,33 @@ def main(argv: Optional[list[str]] = None) -> int:
 			elif ch in ("1", "2", "3"):
 				idx = int(ch)
 				handle_ability_selection(state, idx)
+			elif ch == "\r" and not state.in_combat:
+				adj = None
+				for m in getattr(state, 'merchants', []):
+					if abs(state.player.position[0]-m.position[0]) + abs(state.player.position[1]-m.position[1]) == 1:
+						adj = m
+						break
+				if adj:
+					shop_mode = True
+					shop_selected = 0
 			elif ch == "e" and state.in_combat and state.combat_state:
 				end_combat_turn(state.combat_state)
 			elif ch == "h":
 				state.log.entries.append("help shown")
 		draw(state, inventory_mode, selected_item, selected_tab)
+		if shop_mode:
+			adj = None
+			for m in getattr(state, 'merchants', []):
+				if abs(state.player.position[0]-m.position[0]) + abs(state.player.position[1]-m.position[1]) == 1:
+					adj = m
+					break
+			if adj:
+				shop = load_shop(Path(__file__).resolve().parents[1] / 'content' / 'shops' / f"{adj.shop_id}.json")
+				print("\n🛒 Shop:")
+				for i, it in enumerate(shop.items):
+					marker = "▶" if i == shop_selected else " "
+					print(f" {marker} {it.item_id} - {it.price} gold")
+				print("Enter: Buy | Esc: Close")
 	return 0
 
 

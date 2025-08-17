@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, List, Tuple
 
-from .effects import Damage, Push, BuffAp
+from .effects import Damage, Push, BuffAp, Charge, Effect
 
 
 @dataclass
@@ -14,7 +14,7 @@ class Ability:
 	cost_ap: int
 	range_min: int
 	range_max: int
-	effects: List[Dict[str, any]]
+	effects: List[Effect]
 	weapon_type: str = ""
 
 
@@ -38,7 +38,7 @@ def create_weapon_abilities() -> None:
 			cost_ap=2,
 			range_min=0,
 			range_max=0,
-			effects=[{"type": "buff_ap", "amount": 2, "duration": 1}],
+			effects=[BuffAp(amount=2, duration=1)],
 			weapon_type="sword"
 		),
 		Ability(
@@ -48,7 +48,7 @@ def create_weapon_abilities() -> None:
 			cost_ap=3,
 			range_min=1,
 			range_max=4,
-			effects=[{"type": "charge", "amount": 25}],
+			effects=[Charge(amount=25)],
 			weapon_type="sword"
 		),
 		Ability(
@@ -58,7 +58,7 @@ def create_weapon_abilities() -> None:
 			cost_ap=4,
 			range_min=1,
 			range_max=1,
-			effects=[{"type": "damage", "amount": 35}],
+			effects=[Damage(amount=35)],
 			weapon_type="sword"
 		)
 	]
@@ -71,7 +71,7 @@ def create_weapon_abilities() -> None:
 			cost_ap=2,
 			range_min=0,
 			range_max=0,
-			effects=[{"type": "buff_ap", "amount": 2, "duration": 1}],
+			effects=[BuffAp(amount=2, duration=1)],
 			weapon_type="bow"
 		),
 		Ability(
@@ -81,7 +81,7 @@ def create_weapon_abilities() -> None:
 			cost_ap=3,
 			range_min=2,
 			range_max=6,
-			effects=[{"type": "damage", "amount": 30}],
+			effects=[Damage(amount=30)],
 			weapon_type="bow"
 		),
 		Ability(
@@ -91,7 +91,7 @@ def create_weapon_abilities() -> None:
 			cost_ap=4,
 			range_min=2,
 			range_max=5,
-			effects=[{"type": "damage", "amount": 20}, {"type": "push", "distance": 2}],
+			effects=[Damage(amount=20), Push(distance=2)],
 			weapon_type="bow"
 		)
 	]
@@ -104,7 +104,7 @@ def create_weapon_abilities() -> None:
 			cost_ap=2,
 			range_min=0,
 			range_max=0,
-			effects=[{"type": "buff_ap", "amount": 2, "duration": 1}],
+			effects=[BuffAp(amount=2, duration=1)],
 			weapon_type="staff"
 		),
 		Ability(
@@ -114,7 +114,7 @@ def create_weapon_abilities() -> None:
 			cost_ap=4,
 			range_min=2,
 			range_max=5,
-			effects=[{"type": "damage", "amount": 40}],
+			effects=[Damage(amount=40)],
 			weapon_type="staff"
 		),
 		Ability(
@@ -124,7 +124,7 @@ def create_weapon_abilities() -> None:
 			cost_ap=3,
 			range_min=0,
 			range_max=0,
-			effects=[{"type": "buff_ap", "amount": 3, "duration": 2}],
+			effects=[BuffAp(amount=3, duration=2)],
 			weapon_type="staff"
 		)
 	]

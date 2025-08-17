@@ -45,7 +45,8 @@ class MonsterModel(BaseModel):
 class EffectModel(BaseModel):
 	type: str
 	amount: int | None = None
-	duration_turns: int | None = None
+	distance: int | None = None
+	duration: int | None = None
 
 
 class SpellModel(BaseModel):
@@ -56,6 +57,29 @@ class SpellModel(BaseModel):
 	range_min: int = 0
 	range_max: int
 	effects: List[EffectModel]
+
+
+class AbilityModel(BaseModel):
+	id: str
+	name: str
+	tags: List[str]
+	cost_ap: int
+	range_min: int = 0
+	range_max: int
+	effects: List[EffectModel]
+	weapon_type: str
+
+
+class ShopItemModel(BaseModel):
+	item_id: str
+	price: int
+	stock: int | None = None
+
+
+class ShopModel(BaseModel):
+	id: str
+	name: str
+	items: List[ShopItemModel]
 
 
 def load_json(path: Path) -> dict:
@@ -85,5 +109,21 @@ def load_spells(path: Path) -> List[SpellModel]:
 		return [SpellModel(**s) for s in data]
 	except ValidationError as e:
 		raise ValueError(f"Invalid spells at {path}: {e}")
+
+
+def load_abilities(path: Path) -> List[AbilityModel]:
+	try:
+		data = load_json(path)
+		return [AbilityModel(**s) for s in data]
+	except ValidationError as e:
+		raise ValueError(f"Invalid abilities at {path}: {e}")
+
+
+def load_shop(path: Path) -> ShopModel:
+	try:
+		data = load_json(path)
+		return ShopModel(**data)
+	except ValidationError as e:
+		raise ValueError(f"Invalid shop at {path}: {e}")
 
 

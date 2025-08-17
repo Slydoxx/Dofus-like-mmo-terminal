@@ -87,3 +87,8 @@ class Monster(Entity):
 	pass
 
 
+@dataclass
+class Merchant(Entity):
+	shop_id: str
+
+

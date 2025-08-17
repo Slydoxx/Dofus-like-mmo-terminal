@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Union
 
 
 @dataclass
@@ -10,12 +11,20 @@ class Damage:
 
 @dataclass
 class Push:
-	amount: int
+	distance: int
 
 
 @dataclass
 class BuffAp:
 	amount: int
-	duration_turns: int
+	duration: int
+
+
+@dataclass
+class Charge:
+	amount: int
+
+
+Effect = Union[Damage, Push, BuffAp, Charge]
 
 

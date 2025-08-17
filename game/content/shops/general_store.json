@@ -1,0 +1,13 @@
+{
+  "id": "general_store",
+  "name": "General Store",
+  "items": [
+    { "item_id": "health_potion", "price": 20 },
+    { "item_id": "mana_potion", "price": 15 },
+    { "item_id": "iron_sword", "price": 100 },
+    { "item_id": "wooden_bow", "price": 80 },
+    { "item_id": "magic_staff", "price": 120 },
+    { "item_id": "leather_armor", "price": 50 }
+  ]
+}
+
