@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Dict, List, Optional
 
 from .stats import Stats
@@ -68,34 +68,55 @@ class Inventory:
 	max_weight: float = 50.0
 	
 	def add_item(self, item: Item) -> bool:
-		if self.total_weight + item.weight > self.max_weight:
+		incoming_weight = item.weight * item.quantity
+		if self.total_weight + incoming_weight > self.max_weight:
 			return False
 		
 		if item.stackable:
+			remaining = item.quantity
+			# Fill existing stacks first
 			for existing_item in self.items:
+				if remaining <= 0:
+					break
 				if existing_item.id == item.id and existing_item.quantity < existing_item.max_stack:
 					space_left = existing_item.max_stack - existing_item.quantity
-					amount_to_add = min(space_left, item.quantity)
+					amount_to_add = min(space_left, remaining)
 					existing_item.quantity += amount_to_add
 					self.total_weight += amount_to_add * item.weight
-					return True
+					remaining -= amount_to_add
+			# Create new stacks for any remaining
+			while remaining > 0:
+				create_qty = min(item.max_stack, remaining)
+				new_stack = replace(item, quantity=create_qty)
+				self.items.append(new_stack)
+				self.total_weight += create_qty * item.weight
+				remaining -= create_qty
+			return True
 		
+		# Non-stackable: append as-is
 		self.items.append(item)
 		self.total_weight += item.weight * item.quantity
 		return True
 	
 	def remove_item(self, item_id: str, quantity: int = 1) -> bool:
-		for i, item in enumerate(self.items):
-			if item.id == item_id:
-				if item.quantity <= quantity:
-					removed_weight = item.weight * item.quantity
-					self.items.pop(i)
-					self.total_weight -= removed_weight
-				else:
-					item.quantity -= quantity
-					self.total_weight -= item.weight * quantity
-				return True
-		return False
+		remaining = quantity
+		i = 0
+		while i < len(self.items) and remaining > 0:
+			item = self.items[i]
+			if item.id != item_id:
+				i += 1
+				continue
+			if item.quantity <= remaining:
+				self.total_weight -= item.weight * item.quantity
+				remaining -= item.quantity
+				self.items.pop(i)
+				continue
+			# Partial remove from this stack
+			item.quantity -= remaining
+			self.total_weight -= item.weight * remaining
+			remaining = 0
+			break
+		return remaining == 0
 	
 	def has_item(self, item_id: str, quantity: int = 1) -> bool:
 		total_quantity = 0

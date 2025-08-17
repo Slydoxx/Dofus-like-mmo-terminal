@@ -298,6 +298,12 @@ def handle_ability_selection(state: GameState, index: int) -> None:
 	# Instant cast at current enemy
 	src = state.player.position
 	tgt = state.combat_state.monsters[0].position
+	# Optional melee adjacency only for true CQC (range_max<=1)
+	if "melee" in ab.tags and ab.range_max <= 1:
+		dist = abs(tgt[0] - src[0]) + abs(tgt[1] - src[1])
+		if dist != 1:
+			state.log.log("Target not adjacent for melee ability")
+			return
 	if not in_range(ab, src, tgt):
 		state.log.log(f"Target out of range! Range: {ab.range_min}-{ab.range_max}")
 		return
@@ -315,6 +321,42 @@ def handle_ability_selection(state: GameState, index: int) -> None:
 		state.log.log("No AP left! Press 'e' to end turn.")
 	elif not state.combat_state.is_active:
 		state.log.log("💀 Defeat! Combat ended.")
+		end_combat(state)
+
+
+def cast_ability_at(state: GameState, index: int, target: Tuple[int, int]) -> None:
+	if not state.in_combat or not state.combat_state:
+		return
+	weapon_abilities = get_abilities_for_weapon(state.player.progression.equipped_weapon) if state.player.progression.equipped_weapon else []
+	if index < 1 or index > len(weapon_abilities):
+		return
+	ab = weapon_abilities[index - 1]
+	if state.combat_state.player_ap < ab.cost_ap:
+		state.log.log(f"Not enough AP! Need {ab.cost_ap}, have {state.combat_state.player_ap}")
+		return
+	src = state.player.position
+	# True melee adjacency only when range_max<=1
+	if "melee" in ab.tags and ab.range_max <= 1:
+		dist = abs(target[0] - src[0]) + abs(target[1] - src[1])
+		if dist != 1:
+			state.log.log("Target not adjacent for melee ability")
+			return
+	if not in_range(ab, src, target):
+		state.log.log(f"Target out of range! Range: {ab.range_min}-{ab.range_max}")
+		return
+	if "ranged" in ab.tags and not has_line_of_sight(state.combat_state.combat_grid, src, target):
+		state.log.log("🚫 No line of sight")
+		return
+	monster_before = state.combat_state.monsters[0] if state.combat_state.monsters else None
+	resolve_ability_effects(ab, state.player, target, state.combat_state, state.combat_state.monsters)
+	if not state.combat_state.monsters and monster_before is not None:
+		handle_monster_defeat(state, monster_before)
+		state.log.log("🏆 Victory! All monsters defeated!")
+		end_combat(state)
+	elif state.combat_state.player_ap <= 0:
+		state.combat_state.log.log("No AP left! Press 'e' to end turn.")
+	elif not state.combat_state.is_active:
+		state.combat_state.log.log("💀 Defeat! Combat ended.")
 		end_combat(state)
 
 
