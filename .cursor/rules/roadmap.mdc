@@ -1,0 +1,30 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+
+Here’s a tight, high‑impact next slice:
+Combat polish
+Turn strip (You → Enemy), AP/MP bars, ability tooltips (cost/tags/range)
+Hover LoS/range preview per selected ability
+Path highlight + invalid target feedback
+Equip UX
+Slot highlighting on hover; reject glow + shake on invalid drops
+Right‑click to unequip to inventory; show equipped tag in inventory
+Dialogue system
+Load dialogues from JSON (id → lines, choices); same bubble UI
+Branching choices (accept/decline), simple variables (e.g., hasMetNPC)
+Merchant flow
+Prices/affixes in list; confirm dialog for expensive buys
+Proper sell panel (not reusing inventory), multi‑sell with quantity selector
+Profile/inventory QoL
+Drag from profile back to inventory; stack awareness
+Tabs in profile (Stats, Equipment, Skills); basic keybind hints inside panels
+Persistence
+Save/Load (player, equipped, inventory, gold, progression, npcs flags)
+Settings: fullscreen, volume, zoom speed
+Tests (quick)
+Inventory stacking/splitting; equip swap; ability registry per weapon type
+Recommended order: Combat polish → Equip UX highlights → Dialogue from JSON → Merchant sell panel → Save/Load → Tests.
+Say go for “Combat polish,” and I’ll implement: turn strip, ability tooltips, and clearer LoS/range/path feedback.

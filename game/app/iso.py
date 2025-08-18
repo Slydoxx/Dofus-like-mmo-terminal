@@ -6,6 +6,13 @@ from typing import Tuple
 import pygame
 
 from .game_loop import load_content_and_init, try_move, handle_ability_selection, end_combat_turn, abilities_bar, cast_ability_at
+from .ui.panels import (
+    draw_inventory_panel,
+    draw_profile_panel,
+    draw_shop_panel,
+    draw_npc_dialog,
+    draw_merchant_dialog,
+)
 from ..engine.ability import Ability
 from ..engine.content import load_shop
 from ..engine.inventory import get_item_by_id
@@ -82,6 +89,7 @@ def main() -> int:
     selected_ability = 1
     main_menu = True
     menu_sel = 0
+    has_started = False
 
     running = True
     while running:
@@ -97,12 +105,16 @@ def main() -> int:
                     elif event.key == pygame.K_RETURN:
                         if menu_sel == 0:
                             main_menu = False
+                            has_started = True
                         elif menu_sel == 1:
                             pass
                         elif menu_sel == 2:
                             running = False
                     elif event.key == pygame.K_ESCAPE:
-                        running = False
+                        if has_started:
+                            main_menu = False
+                        else:
+                            running = False
                     continue
                 # When an NPC dialog is open, block all input except closing keys
                 if npc_dialog:
@@ -118,9 +130,12 @@ def main() -> int:
                     elif inventory_mode:
                         inventory_mode = False
                     else:
-                        # Open the initial main menu as a simple pause menu
-                        main_menu = True
-                        menu_sel = 0
+                        # Toggle pause menu instead of quitting
+                        if main_menu:
+                            main_menu = False
+                        else:
+                            main_menu = True
+                            menu_sel = 0
                         continue
                 elif event.key == pygame.K_MINUS:
                     scale = max(0.6, scale - 0.1)
@@ -307,10 +322,43 @@ def main() -> int:
                                 npc_dialog_text = "Hello, traveler. The dungeon awaits!"
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 mx, my = pygame.mouse.get_pos()
+                # Ability bar clicks removed per request
+                if main_menu and event.button == 1:
+                    col_x = SCREEN_W//2 - 100
+                    col_w = 200
+                    for i in range(3):
+                        ry = 240 + i*36
+                        rect = pygame.Rect(col_x, ry, col_w, 32)
+                        if rect.collidepoint(mx, my):
+                            menu_sel = i
+                            if menu_sel == 0:
+                                main_menu = False
+                                if not has_started:
+                                    has_started = True
+                            elif menu_sel == 1:
+                                pass
+                            elif menu_sel == 2:
+                                running = False
+                            break
                 if inventory_mode and event.button == 1:
-                    # Inventory header drag
                     inv_header = pygame.Rect(inv_panel_x, inv_panel_y, inv_panel_w, 28)
+                    clicked_tab = False
                     if inv_header.collidepoint(mx, my):
+                        font_tab = pygame.font.SysFont(None, 22)
+                        tabs = ["Items", "Weapons", "Armor"]
+                        xcur = inv_panel_x + 10
+                        space_w = font_tab.size("  ")[0]
+                        for i, t in enumerate(tabs):
+                            label = f"[{t}]" if i == inv_tab else t
+                            tw = font_tab.size(label)[0]
+                            rect = pygame.Rect(xcur, inv_panel_y + 6, tw, 20)
+                            if rect.collidepoint(mx, my):
+                                inv_tab = i
+                                inv_sel = 0
+                                clicked_tab = True
+                                break
+                            xcur += tw + space_w
+                    if inv_header.collidepoint(mx, my) and not clicked_tab:
                         inv_dragging = True
                         inv_drag_offset = (mx - inv_panel_x, my - inv_panel_y)
                     # Begin dragging item from list
@@ -323,6 +371,7 @@ def main() -> int:
                     }
                     items = cats.get(inv_tab, [])
                     if 0 <= idx < len(items):
+                        inv_sel = idx
                         dragging_item = items[idx]
                         dragging_mouse = (mx, my)
                 if profile_mode and event.button == 1:
@@ -331,6 +380,16 @@ def main() -> int:
                     if prof_header.collidepoint(mx, my):
                         prof_dragging = True
                         prof_drag_offset = (mx - prof_panel_x, my - prof_panel_y)
+                if shop_mode and not shop_dialog and event.button == 1:
+                    panel_w = 420
+                    panel_h = 260
+                    panel_x = 16
+                    panel_y = 80
+                    if pygame.Rect(panel_x, panel_y, panel_w, panel_h).collidepoint(mx, my):
+                        list_y = panel_y + 36
+                        idx = (my - list_y) // 24
+                        if idx >= 0:
+                            shop_sel = idx
                 # World/combat click handling
                 if state.in_combat and event.button == 1 and not (inventory_mode or profile_mode or shop_mode or npc_dialog):
                     mx, my = pygame.mouse.get_pos()
@@ -414,6 +473,16 @@ def main() -> int:
                     dragging_item = None
                     dragging_mouse = (0,0)
             if event.type == pygame.MOUSEMOTION:
+                if main_menu:
+                    mx, my = event.pos
+                    col_x = SCREEN_W//2 - 100
+                    col_w = 200
+                    for i in range(3):
+                        ry = 240 + i*36
+                        rect = pygame.Rect(col_x, ry, col_w, 32)
+                        if rect.collidepoint(mx, my):
+                            menu_sel = i
+                            break
                 if inv_dragging:
                     mx, my = event.pos
                     inv_panel_x = max(0, min(SCREEN_W - inv_panel_w, mx - inv_drag_offset[0]))
@@ -629,51 +698,11 @@ def main() -> int:
         
         # Draw NPC dialog bubble overlay (non-blocking)
         if npc_dialog:
-            panel_w, panel_h = 520, 160
-            panel_x, panel_y = SCREEN_W//2 - panel_w//2, SCREEN_H - panel_h - 60
-            pygame.draw.rect(screen, COLOR_PANEL, pygame.Rect(panel_x, panel_y, panel_w, panel_h))
-            speaker = pygame.font.SysFont(None, 24).render("NPC:", True, (235, 235, 245))
-            # Simple word wrap
-            words = npc_dialog_text.split(" ")
-            lines = []
-            cur = ""
-            font24 = pygame.font.SysFont(None, 24)
-            for w in words:
-                test = (cur + " " + w).strip()
-                if font24.size(test)[0] > panel_w - 24:
-                    lines.append(cur)
-                    cur = w
-                else:
-                    cur = test
-            if cur:
-                lines.append(cur)
-            screen.blit(speaker, (panel_x + 12, panel_y + 12))
-            y_text = panel_y + 44
-            for ln in lines[:4]:
-                surf = font24.render(ln, True, (220, 220, 230))
-                screen.blit(surf, (panel_x + 12, y_text))
-                y_text += 26
-            hint = pygame.font.SysFont(None, 20).render("Enter/Esc to close", True, (150, 150, 160))
-            screen.blit(hint, (panel_x + panel_w - 180, panel_y + panel_h - 28))
+            draw_npc_dialog(screen, npc_dialog_text, SCREEN_W, SCREEN_H)
 
         # Draw Merchant dialog bubble overlay on top of map too
         if merchant_dialog:
-            panel_w, panel_h = 520, 180
-            panel_x, panel_y = SCREEN_W//2 - panel_w//2, SCREEN_H - panel_h - 60
-            pygame.draw.rect(screen, (18, 18, 26), pygame.Rect(panel_x, panel_y, panel_w, panel_h))
-            speaker = pygame.font.SysFont(None, 24).render("Merchant:", True, (235, 235, 245))
-            msg = pygame.font.SysFont(None, 24).render(merchant_dialog_text, True, (220, 220, 230))
-            screen.blit(speaker, (panel_x + 12, panel_y + 12))
-            screen.blit(msg, (panel_x + 12, panel_y + 44))
-            if merchant_stage == "greet":
-                hint = pygame.font.SysFont(None, 20).render("Enter: Continue  Esc: Close", True, (150, 150, 160))
-                screen.blit(hint, (panel_x + panel_w - 200, panel_y + panel_h - 28))
-            else:
-                opts = ["Buy", "Sell", "Leave"]
-                for i, label in enumerate(opts):
-                    col = (240, 240, 255) if i == merchant_dialog_sel else (175, 180, 190)
-                    surf = pygame.font.SysFont(None, 24).render(label, True, col)
-                    screen.blit(surf, (panel_x + 24, panel_y + 80 + i*26))
+            draw_merchant_dialog(screen, merchant_dialog_text, merchant_stage, merchant_dialog_sel, SCREEN_W, SCREEN_H)
 
         # HUD overlay with mini-map and quest stub
         font = pygame.font.SysFont(None, 22)
@@ -696,70 +725,58 @@ def main() -> int:
             hud_lines.append(world_line)
         hud_lines.append(f"Abilities: {abilities_bar(state)}")
         # Draw HUD background
-        hud_h = 20 * (len(hud_lines) + 1)
-        pygame.draw.rect(screen, (10, 10, 15), pygame.Rect(0, 0, SCREEN_W, hud_h))
+        extra_h = 28
+        hud_h = 20 * (len(hud_lines) + 1) + extra_h
+        pygame.draw.rect(screen, COLOR_HEADER, pygame.Rect(0, 0, SCREEN_W, hud_h))
         y = 4
         for line in hud_lines:
             surf = font.render(line, True, (230, 230, 240))
             screen.blit(surf, (8, y))
             y += 20
 
+        ap_curr = 0
+        ap_max = max(1, total.ap)
+        mp_curr = 0
+        mp_max = max(1, total.mp)
+        if state.in_combat and state.combat_state:
+            ap_curr = max(0, int(state.combat_state.player_ap))
+            mp_curr = max(0, int(state.combat_state.player_mp))
+        else:
+            ap_curr = max(0, int(total.ap))
+            mp_curr = max(0, int(total.current_mp))
+        bar_w = 240
+        bar_h = 10
+        ap_x = 8
+        ap_y = hud_h - extra_h + 6
+        mp_x = 8
+        mp_y = ap_y + bar_h + 6
+        pygame.draw.rect(screen, (30, 35, 50), pygame.Rect(ap_x, ap_y, bar_w, bar_h))
+        pygame.draw.rect(screen, COLOR_HILITE, pygame.Rect(ap_x, ap_y, int(bar_w * (ap_curr / ap_max)), bar_h))
+        pygame.draw.rect(screen, (30, 35, 50), pygame.Rect(mp_x, mp_y, bar_w, bar_h))
+        pygame.draw.rect(screen, (80, 200, 120), pygame.Rect(mp_x, mp_y, int(bar_w * (mp_curr / mp_max)), bar_h))
+        ap_label = pygame.font.SysFont(None, 18).render(f"AP {ap_curr}/{ap_max}", True, COLOR_TEXT)
+        mp_label = pygame.font.SysFont(None, 18).render(f"MP {mp_curr}/{mp_max}", True, COLOR_TEXT)
+        screen.blit(ap_label, (ap_x + bar_w + 10, ap_y - 3))
+        screen.blit(mp_label, (mp_x + bar_w + 10, mp_y - 3))
+
+        if state.in_combat and state.combat_state:
+            phase = state.combat_state.current_phase
+            label = "PLAYER TURN" if phase == "player_turn" else "ENEMY TURN"
+            lc = (230, 230, 240) if phase == "player_turn" else (250, 180, 160)
+            pill = pygame.font.SysFont(None, 22).render(label, True, lc)
+            pad = 10
+            pr = pygame.Rect(0, 0, pill.get_width() + pad * 2, pill.get_height() + 8)
+            pr.centerx = SCREEN_W // 2
+            pr.y = 6
+            pygame.draw.rect(screen, (25, 28, 40), pr)
+            pygame.draw.rect(screen, (70, 80, 110), pr, 1)
+            screen.blit(pill, (pr.x + pad, pr.y + 4))
+
+        # Ability bar removed per request
+
         # Profile panel (draggable)
         if profile_mode:
-            pygame.draw.rect(screen, COLOR_PANEL, pygame.Rect(prof_panel_x, prof_panel_y, prof_panel_w, prof_panel_h))
-            # header
-            pygame.draw.rect(screen, COLOR_HEADER, pygame.Rect(prof_panel_x, prof_panel_y, prof_panel_w, 32))
-            title = pygame.font.SysFont(None, 26).render("Profile", True, (235,235,245))
-            screen.blit(title, (prof_panel_x + 12, prof_panel_y + 6))
-            # Identity & Stats
-            sleft_x = prof_panel_x + 16
-            sleft_y = prof_panel_y + 44
-            name_txt = pygame.font.SysFont(None, 24).render(f"Name: {state.player.name}", True, (220,220,230))
-            gold_txt = pygame.font.SysFont(None, 24).render(f"Gold: {state.player.gold}", True, (220,220,230))
-            screen.blit(name_txt, (sleft_x, sleft_y)); sleft_y += 26
-            screen.blit(gold_txt, (sleft_x, sleft_y)); sleft_y += 26
-            st = total
-            for lab, val in [("HP", f"{st.current_hp}/{st.hp}"), ("AP", st.ap), ("MP", st.mp), ("ATK", st.atk), ("RES", st.res), ("ARMOR", st.armor)]:
-                surf = pygame.font.SysFont(None, 22).render(f"{lab}: {val}", True, (205,205,215))
-                screen.blit(surf, (sleft_x, sleft_y)); sleft_y += 22
-            # Equipment
-            mid_x = prof_panel_x + 240
-            mid_y = prof_panel_y + 44
-            screen.blit(pygame.font.SysFont(None, 24).render("Equipment", True, (220,220,230)), (mid_x, mid_y)); mid_y += 26
-            eq = state.player.equipment
-            weapon_name = eq.weapon.name if eq.weapon else "None"
-            screen.blit(pygame.font.SysFont(None, 22).render(f"Weapon: {weapon_name}", True, (205,205,215)), (mid_x, mid_y)); mid_y += 22
-            if eq.weapon:
-                from .game_loop import get_abilities_for_weapon
-                abs_list = [a.name for a in get_abilities_for_weapon(eq.weapon.weapon_type)][:3]
-                screen.blit(pygame.font.SysFont(None, 20).render("Abilities: " + ", ".join(abs_list), True, (190,190,200)), (mid_x+10, mid_y)); mid_y += 22
-            for slot, item in [("Armor", eq.armor), ("Helmet", eq.helmet), ("Boots", eq.boots)]:
-                name = item.name if item else "None"
-                screen.blit(pygame.font.SysFont(None, 22).render(f"{slot}: {name}", True, (205,205,215)), (mid_x, mid_y)); mid_y += 22
-            # Draw drop slot hints (subtle boxes)
-            for i, (slot, yoff) in enumerate([("weapon", 22), ("armor", 22*3), ("helmet", 22*4), ("boots", 22*5)]):
-                r = pygame.Rect(mid_x, (prof_panel_y + 44) + yoff, 220, 20)
-                pygame.draw.rect(screen, COLOR_BORDER, r, 1)
-            # Weight
-            wt = state.player.inventory.total_weight
-            wx = prof_panel_x + 16
-            wy = prof_panel_y + prof_panel_h - 30
-            wtxt = pygame.font.SysFont(None, 20).render(f"Weight: {wt:.1f}/{state.player.inventory.max_weight}", True, (180,180,190))
-            screen.blit(wtxt, (wx, wy))
-            # Weapon skills
-            right_x = prof_panel_x + 430
-            right_y = prof_panel_y + 44
-            screen.blit(pygame.font.SysFont(None, 24).render("Weapon Skills", True, (220,220,230)), (right_x, right_y)); right_y += 30
-            ws = state.player.progression.weapon_skills
-            bars = [("Melee", ws.melee_damage), ("Ranged", ws.ranged_damage), ("Magic", ws.magic_damage)]
-            for label, val in bars:
-                bar_w = 200
-                pygame.draw.rect(screen, (40,45,60), pygame.Rect(right_x, right_y, bar_w, 16))
-                fill = int(min(1.0, val/100.0) * bar_w)
-                pygame.draw.rect(screen, COLOR_HILITE, pygame.Rect(right_x, right_y, fill, 16))
-                lab = pygame.font.SysFont(None, 20).render(f"{label}: {val}", True, (200,200,210))
-                screen.blit(lab, (right_x + bar_w + 10, right_y - 2))
-                right_y += 24
+            draw_profile_panel(screen, state, prof_panel_x, prof_panel_y, prof_panel_w, prof_panel_h)
         # Draw dragging preview
         if dragging_item is not None:
             mx, my = pygame.mouse.get_pos()
@@ -828,73 +845,11 @@ def main() -> int:
 
         # Inventory panel (draggable)
         if inventory_mode:
-            pygame.draw.rect(screen, (15, 15, 22), pygame.Rect(inv_panel_x, inv_panel_y, inv_panel_w, inv_panel_h))
-            # header bar
-            pygame.draw.rect(screen, (22, 22, 30), pygame.Rect(inv_panel_x, inv_panel_y, inv_panel_w, 28))
-            tabs = ["Items", "Weapons", "Armor"]
-            tab_text = "  ".join([("["+t+"]") if i == inv_tab else t for i, t in enumerate(tabs)])
-            if sell_mode:
-                tab_text += "   (Sell mode)"
-            screen.blit(font.render(tab_text, True, (220, 220, 230)), (inv_panel_x + 10, inv_panel_y + 6))
-            cats = {
-                0: [it for it in state.player.inventory.items if hasattr(it, 'effect_type')],
-                1: [it for it in state.player.inventory.items if hasattr(it, 'weapon_type')],
-                2: [it for it in state.player.inventory.items if hasattr(it, 'slot') and not hasattr(it, 'weapon_type')],
-            }
-            items = cats.get(inv_tab, [])
-            list_y = inv_panel_y + 36
-            for i, it in enumerate(items[:10]):
-                mark = ">" if i == inv_sel else " "
-                qty = getattr(it, 'quantity', 1)
-                val = getattr(it, 'value', 0)
-                if sell_mode:
-                    sell_price = max(1, val // 2)
-                    line = f"{mark} {it.name} x{qty}  [{sell_price}g]"
-                else:
-                    line = f"{mark} {it.name} x{qty}"
-                screen.blit(font.render(line, True, (230, 230, 240)), (inv_panel_x + 10, list_y))
-                list_y += 24
-            info_y = inv_panel_y + 36
-            info_x = inv_panel_x + 280
-            if items and inv_sel < len(items):
-                it = items[inv_sel]
-                screen.blit(font.render(it.description, True, (200, 200, 210)), (info_x, info_y)); info_y += 24
-                screen.blit(font.render(f"Qty {getattr(it,'quantity',1)}", True, (200,200,210)), (info_x, info_y)); info_y += 24
-                if hasattr(it, 'weapon_type'):
-                    screen.blit(font.render(f"Type {it.weapon_type} Dmg {it.base_damage}", True, (200, 200, 210)), (info_x, info_y)); info_y += 24
-                elif hasattr(it, 'slot'):
-                    screen.blit(font.render(f"Slot {it.slot}", True, (200, 200, 210)), (info_x, info_y)); info_y += 24
-                elif hasattr(it, 'effect_type'):
-                    screen.blit(font.render(f"{it.effect_type} {it.effect_value}", True, (200, 200, 210)), (info_x, info_y)); info_y += 24
-                screen.blit(font.render(f"Weight {it.weight} Value {it.value}", True, (200, 200, 210)), (info_x, info_y)); info_y += 24
-                if sell_mode:
-                    sp = max(1, getattr(it,'value',0)//2)
-                    screen.blit(font.render(f"Sell: {sp} gold (Enter to sell 1)", True, (180,180,190)), (info_x, info_y))
-                else:
-                    screen.blit(font.render("Enter: Use/Equip  Esc: Close", True, (180, 180, 190)), (info_x, info_y))
+            draw_inventory_panel(screen, state, inv_panel_x, inv_panel_y, inv_panel_w, inv_panel_h, inv_tab, inv_sel, sell_mode)
 
         # Shop panel (Buy mode)
         if shop_mode and not shop_dialog:
-            panel_w = 420
-            panel_h = 260
-            panel_x = 16
-            panel_y = 80
-            pygame.draw.rect(screen, (15, 15, 22), pygame.Rect(panel_x, panel_y, panel_w, panel_h))
-            adj = None
-            for m in getattr(state, 'merchants', []):
-                if abs(state.player.position[0]-m.position[0]) + abs(state.player.position[1]-m.position[1]) == 1:
-                    adj = m
-                    break
-            if adj:
-                shop = load_shop(Path(__file__).resolve().parents[1] / 'content' / 'shops' / f"{adj.shop_id}.json")
-                screen.blit(font.render(shop.name, True, (230, 230, 240)), (panel_x + 10, panel_y + 8))
-                ylist = panel_y + 36
-                for i, it in enumerate(shop.items[:10]):
-                    mark = ">" if i == shop_sel else " "
-                    line = f"{mark} {it.item_id} - {it.price} gold"
-                    screen.blit(font.render(line, True, (230, 230, 240)), (panel_x + 10, ylist))
-                    ylist += 24
-                screen.blit(font.render("Enter: Buy  Esc: Close (Tab: Sell soon)", True, (180, 180, 190)), (panel_x + 10, panel_y + panel_h - 28))
+            draw_shop_panel(screen, state, 16, 80, 420, 260, shop_sel)
 
         pygame.display.flip()
         clock.tick(60)
