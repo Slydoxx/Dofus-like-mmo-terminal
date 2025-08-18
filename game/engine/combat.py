@@ -179,7 +179,6 @@ def resolve_ability_effects(
 		if isinstance(effect, Damage):
 			for monster in monsters:
 				if monster.position == target_pos:
-					# If this is a ranged tag, require line-of-sight; melee ignores LoS
 					if "ranged" in ability.tags and not has_line_of_sight(combat_state.combat_grid, source.position, target_pos):
 						combat_state.log.log("🚫 No line of sight")
 						return
@@ -260,22 +259,36 @@ def check_combat_trigger(player_pos: Tuple[int, int], monsters: List[Monster]) -
 def monster_ai_turn(combat_state: CombatState) -> None:
 	if not combat_state.monsters:
 		return
-	
-	monster = combat_state.monsters[0]
 	combat_state.log.log("--- Monster's turn ---")
-	
-	if combat_state.monster_ap >= 3:
-		damage = resolve_damage(monster, combat_state.player, monster.stats.atk)
-		combat_state.log.log(f"👹 {monster.name} attacks for {damage} damage!")
-		combat_state.monster_ap -= 3
-	else:
-		combat_state.log.log(f"👹 {monster.name} is too tired to attack")
-	
+	occupied = {m.position for m in combat_state.monsters}
+	occupied.add(combat_state.player.position)
+	for monster in list(combat_state.monsters):
+		if not combat_state.player.stats.is_alive():
+			break
+		px, py = combat_state.player.position
+		mx, my = monster.position
+		dist = abs(px - mx) + abs(py - my)
+		if dist == 1:
+			damage = resolve_damage(monster, combat_state.player, monster.stats.atk)
+			combat_state.log.log(f"👹 {monster.name} attacks for {damage} damage!")
+		else:
+			candidates = [(mx + 1, my), (mx - 1, my), (mx, my + 1), (mx, my - 1)]
+			candidates.sort(key=lambda p: abs(px - p[0]) + abs(py - p[1]))
+			moved = False
+			for nx, ny in candidates:
+				if (0 <= nx < combat_state.combat_grid.width and 0 <= ny < combat_state.combat_grid.height and
+					combat_state.combat_grid.walkable(nx, ny) and (nx, ny) not in occupied):
+					occupied.discard(monster.position)
+					monster.position = (nx, ny)
+					occupied.add(monster.position)
+					moved = True
+					break
+			if not moved:
+				pass
 	if not combat_state.player.stats.is_alive():
 		combat_state.log.log("💀 You have been defeated!")
 		combat_state.is_active = False
 		return
-	
 	combat_state.reset_turn()
 
 

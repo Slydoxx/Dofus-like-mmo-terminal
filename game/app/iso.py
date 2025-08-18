@@ -5,7 +5,7 @@ from typing import Tuple
 
 import pygame
 
-from .game_loop import load_content_and_init, try_move, handle_ability_selection, end_combat_turn, abilities_bar, cast_ability_at
+from .game_loop import load_content_and_init, try_move, handle_ability_selection, end_combat_turn, abilities_bar, cast_ability_at, start_combat
 from .ui.panels import (
     draw_inventory_panel,
     draw_profile_panel,
@@ -287,6 +287,14 @@ def main() -> int:
                         try_move(state, -1, 1)
                     elif event.key == pygame.K_d:
                         try_move(state, 1, -1)
+                    elif event.key == pygame.K_UP:
+                        try_move(state, 0, -1)
+                    elif event.key == pygame.K_DOWN:
+                        try_move(state, 0, 1)
+                    elif event.key == pygame.K_LEFT:
+                        try_move(state, -1, 0)
+                    elif event.key == pygame.K_RIGHT:
+                        try_move(state, 1, 0)
                     elif event.key == pygame.K_1:
                         handle_ability_selection(state, 1)
                     elif event.key == pygame.K_2:
@@ -390,32 +398,34 @@ def main() -> int:
                         idx = (my - list_y) // 24
                         if idx >= 0:
                             shop_sel = idx
-                # World/combat click handling
-                if state.in_combat and event.button == 1 and not (inventory_mode or profile_mode or shop_mode or npc_dialog):
+                if event.button == 1 and not (inventory_mode or profile_mode or shop_mode or npc_dialog):
                     mx, my = pygame.mouse.get_pos()
                     TW = max(16, int(TILE_W * scale))
                     TH = max(8, int(TILE_H * scale))
                     gx = int((my + cam_y - oy) / (TH / 2.0) + (mx + cam_x - ox) / (TW / 2.0)) // 2
                     gy = int((my + cam_y - oy) / (TH / 2.0) - (mx + cam_x - ox) / (TW / 2.0)) // 2
                     active_grid = state.combat_state.combat_grid if (state.in_combat and state.combat_state) else state.grid
-                    if 0 <= gx < active_grid.width and 0 <= gy < active_grid.height and active_grid.walkable(gx, gy):
-                        # Simple pathfinding to clicked tile
+                    if 0 <= gx < active_grid.width and 0 <= gy < active_grid.height:
+                        goal = (gx, gy)
                         def h(a: tuple[int,int], b: tuple[int,int]) -> int:
                             return abs(a[0]-b[0]) + abs(a[1]-b[1])
                         start = state.player.position
-                        goal = (gx, gy)
                         openq: list[tuple[int, tuple[int,int]]] = []
                         heapq.heappush(openq, (0, start))
                         came: dict[tuple[int,int], tuple[int,int] | None] = {start: None}
                         g: dict[tuple[int,int], int] = {start: 0}
-                        occupied = set(m.position for m in (state.combat_state.monsters if (state.in_combat and state.combat_state) else []))
+                        occupied_world = set(m.position for m in (state.monsters if not state.in_combat else []))
+                        occupied_combat = set(m.position for m in (state.combat_state.monsters if (state.in_combat and state.combat_state) else []))
+                        occupied = occupied_combat if state.in_combat else occupied_world
                         while openq:
                             _, cur = heapq.heappop(openq)
                             if cur == goal:
                                 break
                             cx, cy = cur
                             for nx, ny in ((cx+1, cy), (cx-1, cy), (cx, cy+1), (cx, cy-1)):
-                                if 0 <= nx < active_grid.width and 0 <= ny < active_grid.height and active_grid.walkable(nx, ny) and (nx, ny) not in occupied:
+                                if 0 <= nx < active_grid.width and 0 <= ny < active_grid.height and active_grid.walkable(nx, ny):
+                                    if (nx, ny) in occupied and (nx, ny) != goal:
+                                        continue
                                     ng = g[cur] + 1
                                     if (nx, ny) not in g or ng < g[(nx, ny)]:
                                         g[(nx, ny)] = ng
@@ -819,16 +829,23 @@ def main() -> int:
         # Step along movement path over time (combat only)
         dt = clock.get_time() / 1000.0
         step_timer += dt
-        if movement_path and step_timer >= step_interval and state.in_combat and state.combat_state:
-            if state.combat_state.player_mp > 0:
-                step_timer = 0.0
-                nx, ny = movement_path.pop(0)
-                state.player.position = (nx, ny)
+        if movement_path and step_timer >= step_interval:
+            step_timer = 0.0
+            nx, ny = movement_path.pop(0)
+            state.player.position = (nx, ny)
+            if state.in_combat and state.combat_state:
                 state.combat_state.player_mp -= 1
                 if state.combat_state.player_mp <= 0:
                     movement_path = []
             else:
-                movement_path = []
+                hit = None
+                for m in list(getattr(state, 'monsters', [])):
+                    if m.position == state.player.position:
+                        hit = m
+                        break
+                if hit is not None:
+                    movement_path = []
+                    start_combat(state, hit)
 
         # No pixel world movement; keyboard moves are tile-based via try_move above
         # Combat always shows the log; otherwise obey toggle
