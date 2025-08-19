@@ -191,3 +191,14 @@ def draw_merchant_dialog(screen: pygame.Surface, text: str, stage: str, sel: int
             surf = pygame.font.SysFont(None, 24).render(label, True, col)
             screen.blit(surf, (panel_x + 24, panel_y + 80 + i*26))
 
+
+def draw_portal_dialog(screen: pygame.Surface, screen_w: int, screen_h: int) -> None:
+    panel_w, panel_h = 520, 140
+    panel_x, panel_y = screen_w//2 - panel_w//2, screen_h - panel_h - 60
+    pygame.draw.rect(screen, COLOR_PANEL, pygame.Rect(panel_x, panel_y, panel_w, panel_h))
+    title = pygame.font.SysFont(None, 24).render("Portal", True, COLOR_TEXT)
+    msg = pygame.font.SysFont(None, 24).render("Enter to open portal menu (WIP)", True, COLOR_TEXT)
+    screen.blit(title, (panel_x + 12, panel_y + 12))
+    screen.blit(msg, (panel_x + 12, panel_y + 48))
+    hint = pygame.font.SysFont(None, 20).render("Enter/Esc to close", True, COLOR_SUBTEXT)
+    screen.blit(hint, (panel_x + panel_w - 180, panel_y + panel_h - 28))

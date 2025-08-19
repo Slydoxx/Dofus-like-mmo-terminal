@@ -7,7 +7,7 @@ from typing import List, Tuple, Optional
 from ..engine.ability import Ability, REGISTRY, register, create_weapon_abilities, get_abilities_for_weapon, in_range
 from ..engine.combat import CombatState, CombatArena, IntentLog, validate_in_bounds_and_log, resolve_ability_effects, check_combat_trigger, end_combat_turn, render_combat_arena, try_move_in_combat, has_line_of_sight
 from ..engine.content import MapModel, MonsterModel, SpellModel, AbilityModel, load_map, load_monster, load_spells, load_abilities
-from ..engine.entities import Player, Monster, Merchant, Npc
+from ..engine.entities import Player, Monster, Merchant, Npc, Portal
 from ..engine.grid import Grid
 from ..engine.stats import Stats
 from ..engine.progression import Progression, WeaponSkills
@@ -27,7 +27,9 @@ class GameState:
 	merchants: List[Merchant]
 	map_name: str
 	log: IntentLog
+	chat: "ChatLog"
 	npcs: List[Npc] | None = None
+	portals: List[Portal] | None = None
 	combat_state: Optional[CombatState] = None
 	in_combat: bool = False
 	player_world_pos: Optional[Tuple[int, int]] = None
@@ -127,6 +129,8 @@ def load_content_and_init() -> GameState:
 	
 	grid = build_grid_from_map(map_model)
 	player = create_player_with_progression()
+	chat = ChatLog(entries=[])
+	chat.add("System", "Welcome to the Hub")
 	
 	monsters = [
 		create_monster_from_model(monster_model, (10, 10)),
@@ -141,15 +145,69 @@ def load_content_and_init() -> GameState:
 	npcs = [
 		Npc(id="npc1", name="Villager", stats=Stats(hp=1, ap=0, mp=0, atk=0, res=0), position=(3, 2), tags={"npc"}, dialogue_id="greeting_1")
 	]
+	portals = [
+		Portal(id="p_db", name="Daily Boss", stats=Stats(hp=1, ap=0, mp=0, atk=0, res=0), position=(8, 8), tags={"portal"}, destination_id="zone_daily_boss", kind="daily_boss", state="available"),
+		Portal(id="p_ex", name="Exploration", stats=Stats(hp=1, ap=0, mp=0, atk=0, res=0), position=(12, 6), tags={"portal"}, destination_id="zone_exploration", kind="exploration", state="available"),
+		Portal(id="p_dg", name="Dungeon", stats=Stats(hp=1, ap=0, mp=0, atk=0, res=0), position=(6, 12), tags={"portal"}, destination_id="zone_dungeon", kind="dungeon", state="available"),
+		Portal(id="p_pv", name="PvP Arena", stats=Stats(hp=1, ap=0, mp=0, atk=0, res=0), position=(16, 10), tags={"portal"}, destination_id="zone_pvp", kind="pvp", state="locked"),
+		Portal(id="p_rd", name="Raid", stats=Stats(hp=1, ap=0, mp=0, atk=0, res=0), position=(20, 8), tags={"portal"}, destination_id="zone_raid", kind="raid", state="locked"),
+	]
 	return GameState(
 		grid=grid,
 		player=player,
 		monsters=monsters,
 		merchants=merchants,
 		npcs=npcs,
+		portals=portals,
 		map_name=map_model.name,
-		log=IntentLog(entries=[])
+		log=IntentLog(entries=[]),
+		chat=chat
 	)
+
+
+@dataclass
+class ChatMessage:
+	timestamp: str
+	author: str
+	text: str
+	type: str = "chat"
+
+
+@dataclass
+class ChatLog:
+	entries: List[ChatMessage]
+
+	def add(self, author: str, text: str, type: str = "chat") -> None:
+		from datetime import datetime
+		self.entries.append(ChatMessage(timestamp=datetime.now().strftime("%H:%M"), author=author, text=text, type=type))
+
+
+def travel_to_map(state: GameState, destination_id: str) -> None:
+	path = CONTENT_DIR / "maps" / f"{destination_id}.json"
+	model = load_map(path)
+	state.grid = build_grid_from_map(model)
+	state.map_name = model.name
+	state.in_combat = False
+	state.combat_state = None
+	state.player.position = (2, 2)
+	if destination_id == "zone_001":
+		state.portals = [
+			Portal(id="p_db", name="Daily Boss", stats=Stats(hp=1, ap=0, mp=0, atk=0, res=0), position=(8, 8), tags={"portal"}, destination_id="zone_daily_boss", kind="daily_boss", state="available"),
+			Portal(id="p_ex", name="Exploration", stats=Stats(hp=1, ap=0, mp=0, atk=0, res=0), position=(12, 6), tags={"portal"}, destination_id="zone_exploration", kind="exploration", state="available"),
+			Portal(id="p_dg", name="Dungeon", stats=Stats(hp=1, ap=0, mp=0, atk=0, res=0), position=(6, 12), tags={"portal"}, destination_id="zone_dungeon", kind="dungeon", state="available"),
+			Portal(id="p_pv", name="PvP Arena", stats=Stats(hp=1, ap=0, mp=0, atk=0, res=0), position=(16, 10), tags={"portal"}, destination_id="zone_pvp", kind="pvp", state="locked"),
+			Portal(id="p_rd", name="Raid", stats=Stats(hp=1, ap=0, mp=0, atk=0, res=0), position=(20, 8), tags={"portal"}, destination_id="zone_raid", kind="raid", state="locked"),
+		]
+		state.merchants = [Merchant(id="m1", name="Trader", stats=Stats(hp=1, ap=0, mp=0, atk=0, res=0), position=(5, 10), tags={"merchant"}, shop_id="general_store")]
+		state.npcs = [Npc(id="npc1", name="Villager", stats=Stats(hp=1, ap=0, mp=0, atk=0, res=0), position=(3, 2), tags={"npc"}, dialogue_id="greeting_1")]
+		mon_model = load_monster(CONTENT_DIR / "monsters" / "slime.json")
+		state.monsters = [create_monster_from_model(mon_model, (10, 10))]
+	else:
+		state.portals = [Portal(id="p_return", name="Return", stats=Stats(hp=1, ap=0, mp=0, atk=0, res=0), position=(2, 3), tags={"portal"}, destination_id="zone_001", kind="return", state="available")]
+		state.merchants = []
+		state.npcs = []
+		mon_model = load_monster(CONTENT_DIR / "monsters" / "slime.json")
+		state.monsters = [create_monster_from_model(mon_model, (6, 6))]
 
 
 def try_move(state: GameState, dx: int, dy: int) -> None:
@@ -162,6 +220,10 @@ def try_move(state: GameState, dx: int, dy: int) -> None:
 	new_y = state.player.position[1] + dy
 	if state.grid.walkable(new_x, new_y):
 		state.player.position = (new_x, new_y)
+		for p in getattr(state, 'portals', []) or []:
+			if (new_x, new_y) == p.position and getattr(p, 'state', 'available') == 'available':
+				travel_to_map(state, p.destination_id)
+				return
 		
 		triggered_monster = check_combat_trigger(state.player.position, state.monsters)
 		if triggered_monster:

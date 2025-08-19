@@ -5,7 +5,7 @@ from typing import Tuple
 
 import pygame
 
-from .game_loop import load_content_and_init, try_move, handle_ability_selection, end_combat_turn, abilities_bar, cast_ability_at, start_combat
+from .game_loop import load_content_and_init, try_move, handle_ability_selection, end_combat_turn, abilities_bar, cast_ability_at, start_combat, travel_to_map
 from .ui.panels import (
     draw_inventory_panel,
     draw_profile_panel,
@@ -69,6 +69,12 @@ def main() -> int:
     merchant_dialog_text = ""
     merchant_stage = "greet"
     show_log = False
+    chat_input_mode = False
+    chat_input_text = ""
+    chat_timer = 0.0
+    chat_tab = 0
+    chat_scroll_chat = 0
+    chat_scroll_events = 0
     profile_mode = False
     dragging_item = None
     dragging_mouse = (0, 0)
@@ -90,9 +96,12 @@ def main() -> int:
     main_menu = True
     menu_sel = 0
     has_started = False
+    last_world_click_goal: tuple[int, int] | None = None
 
     running = True
     while running:
+        ox = 0
+        oy = 0
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
@@ -129,6 +138,9 @@ def main() -> int:
                         shop_mode = False
                     elif inventory_mode:
                         inventory_mode = False
+                    elif chat_input_mode:
+                        chat_input_mode = False
+                        chat_input_text = ""
                     else:
                         # Toggle pause menu instead of quitting
                         if main_menu:
@@ -150,8 +162,12 @@ def main() -> int:
                 elif event.key == pygame.K_p:
                     if not (shop_mode or shop_dialog or npc_dialog or merchant_dialog):
                         profile_mode = not profile_mode
-                elif event.key == pygame.K_h:
-                    show_log = not show_log
+                elif event.key == pygame.K_t and not state.in_combat and not chat_input_mode:
+                    chat_input_mode = True
+                    chat_input_text = ""
+                elif event.key == pygame.K_TAB:
+                    if not state.in_combat:
+                        chat_tab = 1 - chat_tab
                 elif shop_dialog:
                     if event.key == pygame.K_UP:
                         shop_dialog_sel = (shop_dialog_sel - 1) % 3
@@ -276,6 +292,20 @@ def main() -> int:
                         else:
                             inventory_mode = False
                 else:
+                    if chat_input_mode and not state.in_combat and chat_tab == 0:
+                        if event.key == pygame.K_RETURN:
+                            if chat_input_text.strip():
+                                state.chat.add("You", chat_input_text.strip())
+                                chat_scroll_chat = 0
+                            chat_input_mode = False
+                            chat_input_text = ""
+                        elif event.key == pygame.K_BACKSPACE:
+                            chat_input_text = chat_input_text[:-1]
+                        else:
+                            ch = event.unicode
+                            if ch and ch.isprintable():
+                                chat_input_text += ch
+                        continue
                     # Isometric-friendly WASD mapping
                     # W: up (screen) => (-1, -1), S: down => (+1, +1)
                     # A: left => (-1, +1), D: right => (+1, -1)
@@ -319,7 +349,6 @@ def main() -> int:
                             npc_dialog = False
                             continue
                         else:
-                            # NPC dialogue if adjacent
                             near = None
                             for n in getattr(state, 'npcs', []) or []:
                                 if abs(state.player.position[0]-n.position[0]) + abs(state.player.position[1]-n.position[1]) == 1:
@@ -328,8 +357,150 @@ def main() -> int:
                             if near:
                                 npc_dialog = True
                                 npc_dialog_text = "Hello, traveler. The dungeon awaits!"
+                            else:
+                                pass
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 mx, my = pygame.mouse.get_pos()
+                if event.button == 1:
+                    chat_w = 300
+                    chat_h = 220
+                    chat_x = 12
+                    chat_y = SCREEN_H - chat_h - 12
+                    tab_h = 24
+                    if chat_x <= mx <= chat_x + chat_w and chat_y <= my <= chat_y + chat_h:
+                        if not state.in_combat:
+                            if my <= chat_y + tab_h:
+                                if mx < chat_x + 60:
+                                    chat_tab = 0
+                                elif mx < chat_x + 140:
+                                    chat_tab = 1
+                        continue
+
+                if event.button == 1:
+                    if main_menu and event.type == pygame.MOUSEBUTTONDOWN:
+                        col_x = SCREEN_W//2 - 100
+                        col_w = 200
+                        for i in range(3):
+                            ry = 240 + i*36
+                            rect = pygame.Rect(col_x, ry, col_w, 32)
+                            if rect.collidepoint(mx, my):
+                                menu_sel = i
+                                if menu_sel == 0:
+                                    main_menu = False
+                                    if not has_started:
+                                        has_started = True
+                                elif menu_sel == 1:
+                                    pass
+                                elif menu_sel == 2:
+                                    running = False
+                                break
+                    if inventory_mode and event.type == pygame.MOUSEBUTTONDOWN:
+                        inv_header = pygame.Rect(inv_panel_x, inv_panel_y, inv_panel_w, 28)
+                        clicked_tab = False
+                        if inv_header.collidepoint(mx, my):
+                            font_tab = pygame.font.SysFont(None, 22)
+                            tabs = ["Items", "Weapons", "Armor"]
+                            xcur = inv_panel_x + 10
+                            space_w = font_tab.size("  ")[0]
+                            for i, t in enumerate(tabs):
+                                label = f"[{t}]" if i == inv_tab else t
+                                tw = font_tab.size(label)[0]
+                                rect = pygame.Rect(xcur, inv_panel_y + 6, tw, 20)
+                                if rect.collidepoint(mx, my):
+                                    inv_tab = i
+                                    inv_sel = 0
+                                    clicked_tab = True
+                                    break
+                                xcur += tw + space_w
+                        if inv_header.collidepoint(mx, my) and not clicked_tab:
+                            inv_dragging = True
+                            inv_drag_offset = (mx - inv_panel_x, my - inv_panel_y)
+                        list_y = inv_panel_y + 36
+                        idx = (my - list_y) // 24
+                        cats = {
+                            0: [it for it in state.player.inventory.items if hasattr(it, 'effect_type')],
+                            1: [it for it in state.player.inventory.items if hasattr(it, 'weapon_type')],
+                            2: [it for it in state.player.inventory.items if hasattr(it, 'slot') and not hasattr(it, 'weapon_type')],
+                        }
+                        items = cats.get(inv_tab, [])
+                        if 0 <= idx < len(items):
+                            inv_sel = idx
+                            dragging_item = items[idx]
+                            dragging_mouse = (mx, my)
+                    if profile_mode and event.type == pygame.MOUSEBUTTONDOWN:
+                        prof_header = pygame.Rect(prof_panel_x, prof_panel_y, prof_panel_w, 32)
+                        if prof_header.collidepoint(mx, my):
+                            prof_dragging = True
+                            prof_drag_offset = (mx - prof_panel_x, my - prof_panel_y)
+                    if shop_mode and not shop_dialog and event.type == pygame.MOUSEBUTTONDOWN:
+                        panel_w = 420
+                        panel_h = 260
+                        panel_x = 16
+                        panel_y = 80
+                        if pygame.Rect(panel_x, panel_y, panel_w, panel_h).collidepoint(mx, my):
+                            list_y = panel_y + 36
+                            idx = (my - list_y) // 24
+                            if idx >= 0:
+                                shop_sel = idx
+                    if event.type == pygame.MOUSEBUTTONDOWN and not (inventory_mode or profile_mode or shop_mode or npc_dialog):
+                        TW = max(16, int(TILE_W * scale))
+                        TH = max(8, int(TILE_H * scale))
+                        gx = int((my + cam_y - oy) / (TH / 2.0) + (mx + cam_x - ox) / (TW / 2.0)) // 2
+                        gy = int((my + cam_y - oy) / (TH / 2.0) - (mx + cam_x - ox) / (TW / 2.0)) // 2
+                        active_grid = state.combat_state.combat_grid if (state.in_combat and state.combat_state) else state.grid
+                        if 0 <= gx < active_grid.width and 0 <= gy < active_grid.height:
+                            goal = (gx, gy)
+                            def h(a: tuple[int,int], b: tuple[int,int]) -> int:
+                                return abs(a[0]-b[0]) + abs(a[1]-b[1])
+                            start = state.player.position
+                            openq: list[tuple[int, tuple[int,int]]] = []
+                            heapq.heappush(openq, (0, start))
+                            came: dict[tuple[int,int], tuple[int,int] | None] = {start: None}
+                            g: dict[tuple[int,int], int] = {start: 0}
+                            occupied_world = set(m.position for m in (state.monsters if not state.in_combat else []))
+                            occupied_combat = set(m.position for m in (state.combat_state.monsters if (state.in_combat and state.combat_state) else []))
+                            occupied = occupied_combat if state.in_combat else occupied_world
+                            while openq:
+                                _, cur = heapq.heappop(openq)
+                                if cur == goal:
+                                    break
+                                cx, cy = cur
+                                for nx, ny in ((cx+1, cy), (cx-1, cy), (cx, cy+1), (cx, cy-1)):
+                                    if 0 <= nx < active_grid.width and 0 <= ny < active_grid.height and active_grid.walkable(nx, ny):
+                                        if (nx, ny) in occupied and (nx, ny) != goal:
+                                            continue
+                                        ng = g[cur] + 1
+                                        if (nx, ny) not in g or ng < g[(nx, ny)]:
+                                            g[(nx, ny)] = ng
+                                            pr = ng + h((nx, ny), goal)
+                                            heapq.heappush(openq, (pr, (nx, ny)))
+                                            came[(nx, ny)] = cur
+                            if goal in came:
+                                path: list[tuple[int,int]] = []
+                                cur = goal
+                                while cur != start:
+                                    path.append(cur)
+                                    cur = came[cur]  # type: ignore[index]
+                                path.reverse()
+                                if state.in_combat and state.combat_state:
+                                    mp_left = max(0, int(state.combat_state.player_mp))
+                                    movement_path = path[:mp_left] if mp_left > 0 else []
+                                else:
+                                    movement_path = path
+                                step_timer = 0.0
+            elif event.type == pygame.MOUSEWHEEL:
+                mx, my = pygame.mouse.get_pos()
+                chat_w = 300
+                chat_h = 220
+                chat_x = 12
+                chat_y = SCREEN_H - chat_h - 12
+                if chat_x <= mx <= chat_x + chat_w and chat_y <= my <= chat_y + chat_h:
+                    step = 3
+                    if (state.in_combat or chat_tab == 1):
+                        chat_scroll_events = max(0, chat_scroll_events + (-event.y) * step)
+                    else:
+                        chat_scroll_chat = max(0, chat_scroll_chat + (-event.y) * step)
+                continue
                 # Ability bar clicks removed per request
                 if main_menu and event.button == 1:
                     col_x = SCREEN_W//2 - 100
@@ -417,6 +588,7 @@ def main() -> int:
                         occupied_world = set(m.position for m in (state.monsters if not state.in_combat else []))
                         occupied_combat = set(m.position for m in (state.combat_state.monsters if (state.in_combat and state.combat_state) else []))
                         occupied = occupied_combat if state.in_combat else occupied_world
+                        # Revert portal avoidance during path calc; allow passing over portals
                         while openq:
                             _, cur = heapq.heappop(openq)
                             if cur == goal:
@@ -426,6 +598,7 @@ def main() -> int:
                                 if 0 <= nx < active_grid.width and 0 <= ny < active_grid.height and active_grid.walkable(nx, ny):
                                     if (nx, ny) in occupied and (nx, ny) != goal:
                                         continue
+                                    
                                     ng = g[cur] + 1
                                     if (nx, ny) not in g or ng < g[(nx, ny)]:
                                         g[(nx, ny)] = ng
@@ -445,6 +618,7 @@ def main() -> int:
                             else:
                                 movement_path = path
                             step_timer = 0.0
+                            last_world_click_goal = goal if not state.in_combat else None
             # Mouse up: drop drag to equipment slots if profile open
             if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
                 # stop panel drags
@@ -675,7 +849,7 @@ def main() -> int:
                 sy = int(sy - cam_y + oy)
                 pygame.draw.circle(screen, (80, 120, 200), (sx + TW // 2, sy + TH // 2), 8)
 
-        # Draw merchants and NPCs (world only)
+        # Draw merchants, NPCs, portals (world only)
         if not state.in_combat:
             for m in getattr(state, 'merchants', []):
                 sx, sy = iso_coords_scaled(*m.position, TW, TH)
@@ -689,6 +863,17 @@ def main() -> int:
                 sy = int(sy - cam_y + oy)
                 pygame.draw.ellipse(screen, (0, 0, 0), pygame.Rect(sx + TW // 2 - 10, sy + TH // 2 + 4, 20, 6))
                 pygame.draw.circle(screen, (80, 200, 80), (sx + TW // 2, sy + TH // 2), max(6, int(10 * scale)))
+            for p in getattr(state, 'portals', []) or []:
+                sx, sy = iso_coords_scaled(*p.position, TW, TH)
+                sx = int(sx - cam_x + ox)
+                sy = int(sy - cam_y + oy)
+                pygame.draw.ellipse(screen, (0, 0, 0), pygame.Rect(sx + TW // 2 - 10, sy + TH // 2 + 4, 20, 6))
+                col = (100, 140, 255) if getattr(p, 'state', 'available') == 'available' else (120, 120, 120)
+                pygame.draw.circle(screen, col, (sx + TW // 2, sy + TH // 2), max(6, int(10 * scale)))
+                label = p.name
+                fontp = pygame.font.SysFont(None, 18)
+                surf = fontp.render(label, True, (220,220,230))
+                screen.blit(surf, (sx + TW // 2 - surf.get_width()//2, sy - 14))
         
         # Draw monsters
         mons_to_draw = state.combat_state.monsters if (state.in_combat and state.combat_state) else state.monsters
@@ -705,7 +890,49 @@ def main() -> int:
         sy = int(sy - cam_y + oy)
         pygame.draw.ellipse(screen, (0, 0, 0), pygame.Rect(sx + TW // 2 - 10, sy + TH // 2 + 6, 22, 8))
         pygame.draw.circle(screen, (80, 200, 120), (sx + TW // 2, sy + TH // 2), max(8, int(12 * scale)))
-        
+
+        chat_w = 300
+        chat_h = 220
+        chat_x = 12
+        chat_y = SCREEN_H - chat_h - 12
+        pygame.draw.rect(screen, (12, 12, 18), pygame.Rect(chat_x, chat_y, chat_w, chat_h))
+        tab_h = 24
+        pygame.draw.rect(screen, (18, 18, 26), pygame.Rect(chat_x, chat_y, chat_w, tab_h))
+        ftab = pygame.font.SysFont(None, 20)
+        tab1 = ftab.render("Chat", True, (240,240,245) if chat_tab == 0 else (170,170,180))
+        tab2 = ftab.render("Events", True, (240,240,245) if chat_tab == 1 else (170,170,180))
+        screen.blit(tab1, (chat_x + 10, chat_y + 3))
+        screen.blit(tab2, (chat_x + 70, chat_y + 3))
+        content_y = chat_y + tab_h + 6
+        f20 = pygame.font.SysFont(None, 20)
+        if state.in_combat:
+            chat_tab = 1
+        if chat_tab == 0 and not state.in_combat:
+            hist = state.chat.entries
+            vis_lines = (chat_h - tab_h - 6 - 26 - 8) // 18
+            start = max(0, len(hist) - vis_lines - chat_scroll_chat)
+            end = max(0, len(hist) - chat_scroll_chat)
+            yline = content_y
+            for msg in hist[start:end]:
+                color = (200, 200, 210) if msg.type == "chat" else (180, 200, 120)
+                line = f"[{msg.timestamp}] {msg.author}: {msg.text}"
+                screen.blit(f20.render(line, True, color), (chat_x + 8, yline))
+                yline += 18
+            ibar_h = 26
+            ibar_y = chat_y + chat_h - ibar_h
+            pygame.draw.rect(screen, (18, 18, 26), pygame.Rect(chat_x, ibar_y, chat_w, ibar_h))
+            label = chat_input_text if chat_input_mode else "Press T to chat"
+            screen.blit(f20.render("> " + label, True, (210, 210, 220)), (chat_x + 8, ibar_y + 4))
+        else:
+            ev = (state.log.entries if hasattr(state, 'log') else [])
+            vis_lines = (chat_h - tab_h - 6 - 8) // 18
+            start = max(0, len(ev) - vis_lines - chat_scroll_events)
+            end = max(0, len(ev) - chat_scroll_events)
+            yline = content_y
+            for line in ev[start:end]:
+                screen.blit(f20.render(line, True, (200, 200, 210)), (chat_x + 8, yline))
+                yline += 18
+
         # Draw NPC dialog bubble overlay (non-blocking)
         if npc_dialog:
             draw_npc_dialog(screen, npc_dialog_text, SCREEN_W, SCREEN_H)
@@ -713,6 +940,8 @@ def main() -> int:
         # Draw Merchant dialog bubble overlay on top of map too
         if merchant_dialog:
             draw_merchant_dialog(screen, merchant_dialog_text, merchant_stage, merchant_dialog_sel, SCREEN_W, SCREEN_H)
+
+        
 
         # HUD overlay with mini-map and quest stub
         font = pygame.font.SysFont(None, 22)
@@ -821,6 +1050,10 @@ def main() -> int:
             for n in getattr(state, 'npcs', []) or []:
                 nx0, ny0 = n.position
                 pygame.draw.rect(screen, (80, 200, 80), pygame.Rect(mm_x + nx0 * sx, mm_y + ny0 * sy, max(2, sx), max(2, sy)))
+            for p in getattr(state, 'portals', []) or []:
+                px0, py0 = p.position
+                col = (100, 140, 255) if getattr(p, 'state', 'available') == 'available' else (120, 120, 120)
+                pygame.draw.rect(screen, col, pygame.Rect(mm_x + px0 * sx, mm_y + py0 * sy, max(2, sx), max(2, sy)))
 
         
 
@@ -832,12 +1065,18 @@ def main() -> int:
         if movement_path and step_timer >= step_interval:
             step_timer = 0.0
             nx, ny = movement_path.pop(0)
+            
             state.player.position = (nx, ny)
             if state.in_combat and state.combat_state:
                 state.combat_state.player_mp -= 1
                 if state.combat_state.player_mp <= 0:
                     movement_path = []
             else:
+                stepped_portal = next((p for p in (getattr(state, 'portals', []) or []) if (nx, ny) == p.position), None)
+                if stepped_portal and (nx, ny) == stepped_portal.position:
+                    movement_path = []
+                    travel_to_map(state, stepped_portal.destination_id)
+                    last_world_click_goal = None
                 hit = None
                 for m in list(getattr(state, 'monsters', [])):
                     if m.position == state.player.position:
@@ -848,17 +1087,7 @@ def main() -> int:
                     start_combat(state, hit)
 
         # No pixel world movement; keyboard moves are tile-based via try_move above
-        # Combat always shows the log; otherwise obey toggle
-        want_log = state.in_combat or show_log
-        if want_log:
-            log_lines = state.log.entries[-5:] if hasattr(state, 'log') else []
-            ly = SCREEN_H - 20 * (len(log_lines) + 1)
-            pygame.draw.rect(screen, (10, 10, 15), pygame.Rect(0, ly - 4, SCREEN_W, SCREEN_H - ly + 4))
-            y = ly
-            for entry in log_lines:
-                surf = font.render(entry, True, (200, 200, 210))
-                screen.blit(surf, (8, y))
-                y += 20
+        # Bottom event log removed (Events now in right/left chat panel)
 
         # Inventory panel (draggable)
         if inventory_mode:
@@ -867,6 +1096,8 @@ def main() -> int:
         # Shop panel (Buy mode)
         if shop_mode and not shop_dialog:
             draw_shop_panel(screen, state, 16, 80, 420, 260, shop_sel)
+
+        
 
         pygame.display.flip()
         clock.tick(60)

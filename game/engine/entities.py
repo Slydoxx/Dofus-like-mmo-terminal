@@ -96,3 +96,10 @@ class Merchant(Entity):
 class Npc(Entity):
 	dialogue_id: str
 
+
+@dataclass
+class Portal(Entity):
+	destination_id: str
+	kind: str
+	state: str
+
